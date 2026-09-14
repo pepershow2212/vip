@@ -264,13 +264,12 @@ export async function handleCloseTicket(interaction) {
   const isOwner = ticket && ticket.discord_id === interaction.user.id;
   const isAdmin =
     config.adminUserIds.includes(interaction.user.id) ||
-    interaction.member?.roles?.cache?.some((r) => config.adminRoleIds.includes(r.id));
+    interaction.member?.roles?.cache?.some((r) => config.adminRoleIds.includes(r.id)) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels);
 
-  if (
-    !isOwner &&
-    !isAdmin &&
-    !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
-  ) {
+  if (!isOwner && !isAdmin) {
     await interaction.reply({
       content: "Закрыть тикет может только автор или админ.",
       ephemeral: true,
@@ -278,17 +277,86 @@ export async function handleCloseTicket(interaction) {
     return;
   }
 
-  closeTicket(interaction.channelId, "closed");
-  await interaction.reply({ content: "Тикет закрывается…" });
-  setTimeout(() => {
-    interaction.channel.delete("VIP ticket closed").catch(() => {});
-  }, 1500);
+  await interaction.reply({ content: "Тикет архивируется…" });
+  await archiveTicketChannel(interaction.channel, {
+    status: "closed",
+    reason: "closed by user/admin",
+  });
+}
+
+/**
+ * Архивирует тикет: лок, переименование, опционально в категорию ARCHIVE_CATEGORY_ID.
+ * Не удаляет канал.
+ */
+export async function archiveTicketChannel(channel, { status = "granted", reason = "archived" } = {}) {
+  if (!channel) return;
+  closeTicket(channel.id, status);
+
+  const ownerId = getTicket(channel.id)?.discord_id;
+  const overwrites = [
+    {
+      id: channel.guild.id,
+      deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+    },
+    {
+      id: channel.client.user.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ManageChannels,
+        PermissionFlagsBits.ReadMessageHistory,
+      ],
+    },
+  ];
+  if (ownerId) {
+    overwrites.push({
+      id: ownerId,
+      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+      deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles],
+    });
+  }
+  for (const roleId of config.adminRoleIds) {
+    overwrites.push({
+      id: roleId,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.SendMessages,
+      ],
+    });
+  }
+
+  const baseName = String(channel.name || "vip")
+    .replace(/^архив-/, "")
+    .slice(0, 90);
+  const archivedName = `архив-${baseName}`.slice(0, 100);
+
+  const edit = {
+    name: archivedName,
+    topic: `archived:${reason}`.slice(0, 1024),
+    permissionOverwrites: overwrites,
+    reason: `VIP ticket archive: ${reason}`,
+  };
+  if (config.archiveCategoryId) {
+    edit.parent = config.archiveCategoryId;
+  }
+
+  try {
+    await channel.edit(edit);
+    if (channel.isTextBased()) {
+      await channel.send("Тикет **архивирован**. Переписка сохранена, писать больше нельзя.");
+    }
+  } catch (error) {
+    console.error("archive ticket", channel.id, error instanceof Error ? error.message : error);
+  }
 }
 
 export function scheduleTicketClose(channel, reason = "VIP granted") {
   if (!channel) return;
   closeTicket(channel.id, "granted");
   setTimeout(() => {
-    channel.delete(reason).catch(() => {});
-  }, 12_000);
+    archiveTicketChannel(channel, { status: "granted", reason }).catch((error) => {
+      console.error("schedule archive", error instanceof Error ? error.message : error);
+    });
+  }, 8_000);
 }

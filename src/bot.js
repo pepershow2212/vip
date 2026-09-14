@@ -218,7 +218,7 @@ async function handleCommand(interaction) {
         "",
         "Приоритет в очереди записан на серверах:",
         ...result.rconResults.map((r) => `${r.ok ? "✅" : "❌"} ${r.name}`),
-        ticketChannelId ? "\nТикет закроется через ~12 сек." : "",
+        ticketChannelId ? "\nТикет будет **архивирован** через ~8 сек." : "",
       ]
         .filter(Boolean)
         .join("\n");
