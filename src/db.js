@@ -194,7 +194,7 @@ export function countActiveVips() {
     .get().n;
 }
 
-export function listActiveVips(limit = 50) {
+export function listActiveVips(limit = 80) {
   return getDb()
     .prepare(
       `SELECT * FROM vips
@@ -202,7 +202,7 @@ export function listActiveVips(limit = 50) {
        ORDER BY datetime(expires_at) ASC
        LIMIT ?`,
     )
-    .all(Math.max(1, Math.min(Number(limit) || 50, 100)));
+    .all(Math.max(1, Math.min(Number(limit) || 80, 100)));
 }
 
 export function listVipHistory(limit = 20) {

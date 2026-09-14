@@ -62,7 +62,7 @@ export const config = {
   archiveCategoryId: env("ARCHIVE_CATEGORY_ID", "1549146851058655272"),
   logChannelId: env("LOG_CHANNEL_ID", "1549139317404999790"),
   yoomoneyWallet: env("YOOMONEY_WALLET", "4100119612206096"),
-  vipMaxSlots: Math.max(1, Number(env("VIP_MAX_SLOTS", "50")) || 50),
+  vipMaxSlots: Math.max(1, Number(env("VIP_MAX_SLOTS", "80")) || 80),
   databasePath: resolve(root, env("DATABASE_PATH", "./data/vip.db")),
   servers: [1, 2, 3, 4, 5, 6].map(makeServer),
 };

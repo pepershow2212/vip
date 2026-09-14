@@ -275,7 +275,7 @@ async function handleCommand(interaction) {
           .setFooter({ text: `Активных: ${countActiveVips()}/${config.vipMaxSlots}` });
       }
     } else {
-      const rows = listActiveVips(50);
+      const rows = listActiveVips(80);
       const lines = rows.length
         ? rows.map(
             (v, i) =>
