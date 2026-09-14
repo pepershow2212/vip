@@ -1,5 +1,6 @@
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
@@ -13,6 +14,9 @@ import {
   StringSelectMenuBuilder,
   TextDisplayBuilder,
 } from "discord.js";
+import { readFileSync, existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { PACKAGES, config } from "./config.js";
 import { closeTicket, createTicket, getTicket } from "./db.js";
 
@@ -28,83 +32,101 @@ export const CUSTOM = {
 };
 
 const ACCENT = 0xc4a574;
-const BANNER_URL = "https://i.ibb.co/sdVC2fSz/sss2s123.png";
 const TICKET_EMOJI = "💎";
+const BANNER_NAME = "wardogs-vip-banner.webp";
+const BANNER_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "assets", "banner.webp");
 
-export function panelPayload() {
-  const container = new ContainerBuilder()
-    .setAccentColor(ACCENT)
-    .addMediaGalleryComponents(
-      new MediaGalleryBuilder().addItems(
-        new MediaGalleryItemBuilder().setURL(BANNER_URL),
-      ),
-    )
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        [
-          "# WARDOGS VIP",
-          "Поддержи сервера — получи приоритет в очереди на **WARDOGS RUSSIA**.",
-          "",
-          "Выбери тариф ниже → тикет → перевод → чек.",
-        ].join("\n"),
-      ),
-    )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
-    )
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        [
-          "## Что даёт VIP",
-          "VIP даёт **приоритет в очереди**, но **не** гарантирует мгновенный вход при 100/100.",
-          "Не исключает уже играющих и **не** даёт преимуществ внутри матча.",
-          "Правила сервера одинаковы для всех.",
-          "",
-          "## Тарифы",
-          "• **200 ₽** — 7 дней",
-          "• **600 ₽** — 30 дней",
-          "• **1600 ₽** — 90 дней",
-        ].join("\n"),
-      ),
-    )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
-    )
-    .addActionRowComponents(
-      new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId(CUSTOM.buySelect)
-          .setPlaceholder("Выбери тариф VIP")
-          .addOptions(
-            {
-              label: "200 ₽ · 7 дней",
-              description: "Короткий тест приоритета",
-              value: "7",
-            },
-            {
-              label: "600 ₽ · 30 дней",
-              description: "Оптимальный месячный тариф",
-              value: "30",
-            },
-            {
-              label: "1600 ₽ · 90 дней",
-              description: "Максимальная выгода",
-              value: "90",
-            },
-          ),
-      ),
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(CUSTOM.status)
-          .setLabel("Мой статус VIP")
-          .setStyle(ButtonStyle.Secondary),
-      ),
-    );
+function bannerAttachment() {
+  if (!existsSync(BANNER_PATH)) return null;
+  return new AttachmentBuilder(readFileSync(BANNER_PATH), { name: BANNER_NAME });
+}
 
-  return {
+function withBanner(container) {
+  return container.addMediaGalleryComponents(
+    new MediaGalleryBuilder().addItems(
+      new MediaGalleryItemBuilder().setURL(`attachment://${BANNER_NAME}`),
+    ),
+  );
+}
+
+function messageWithBanner(container) {
+  const file = bannerAttachment();
+  const payload = {
     components: [container],
     flags: MessageFlags.IsComponentsV2,
   };
+  if (file) payload.files = [file];
+  return payload;
+}
+
+export function panelPayload() {
+  const container = withBanner(
+    new ContainerBuilder()
+      .setAccentColor(ACCENT)
+      .addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(
+          [
+            "# WARDOGS VIP",
+            "Поддержи сервера — получи приоритет в очереди на **WARDOGS RUSSIA**.",
+            "",
+            "Выбери тариф ниже → тикет → перевод → чек.",
+          ].join("\n"),
+        ),
+      )
+      .addSeparatorComponents(
+        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+      )
+      .addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(
+          [
+            "## Что даёт VIP",
+            "VIP даёт **приоритет в очереди**, но **не** гарантирует мгновенный вход при 100/100.",
+            "Не исключает уже играющих и **не** даёт преимуществ внутри матча.",
+            "Правила сервера одинаковы для всех.",
+            "",
+            "## Тарифы",
+            "• **200 ₽** — 7 дней",
+            "• **600 ₽** — 30 дней",
+            "• **1600 ₽** — 90 дней",
+          ].join("\n"),
+        ),
+      )
+      .addSeparatorComponents(
+        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+      )
+      .addActionRowComponents(
+        new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(CUSTOM.buySelect)
+            .setPlaceholder("Выбери тариф VIP")
+            .addOptions(
+              {
+                label: "200 ₽ · 7 дней",
+                description: "Короткий тест приоритета",
+                value: "7",
+              },
+              {
+                label: "600 ₽ · 30 дней",
+                description: "Оптимальный месячный тариф",
+                value: "30",
+              },
+              {
+                label: "1600 ₽ · 90 дней",
+                description: "Максимальная выгода",
+                value: "90",
+              },
+            ),
+        ),
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(CUSTOM.status)
+            .setLabel("Мой статус VIP")
+            .setStyle(ButtonStyle.Secondary),
+        ),
+      ),
+  );
+
+  return messageWithBanner(container);
 }
 
 /** Панель админа в канале логов VIP — забрать / проверить БД */
@@ -223,68 +245,62 @@ export function paymentDetailsText(pkg) {
 }
 
 export function paymentPayload(pkg, { mention = "" } = {}) {
-  const container = new ContainerBuilder()
-    .setAccentColor(ACCENT)
-    .addMediaGalleryComponents(
-      new MediaGalleryBuilder().addItems(
-        new MediaGalleryItemBuilder().setURL(BANNER_URL),
+  const container = withBanner(
+    new ContainerBuilder()
+      .setAccentColor(ACCENT)
+      .addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(
+          [mention || null, `# Оплата VIP · ${pkg.label}`].filter(Boolean).join("\n"),
+        ),
+      )
+      .addSeparatorComponents(
+        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+      )
+      .addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(
+          [
+            "## 1. Перевод",
+            `Сумма: **${pkg.price} ₽**`,
+            `ЮMoney: \`${config.yoomoneyWallet}\``,
+            "",
+            "```",
+            paymentDetailsText(pkg),
+            "```",
+          ].join("\n"),
+        ),
+      )
+      .addSeparatorComponents(
+        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+      )
+      .addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(
+          [
+            "## 2. Чек",
+            "Прикрепи **скрин перевода** в этот канал.",
+            "Должны быть видны **сумма** и **кошелёк**.",
+            "",
+            "## 3. Выдача",
+            "Админ проверит чек и выдаст VIP на **WARDOGS RUSSIA**.",
+            "",
+            "_Админ:_ `/vip-grant steam_id:...` — игрок и срок из тикета.",
+          ].join("\n"),
+        ),
+      )
+      .addActionRowComponents(
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(CUSTOM.showPay)
+            .setLabel("Скопировать реквизиты")
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId(CUSTOM.closeTicket)
+            .setLabel("Закрыть тикет")
+            .setStyle(ButtonStyle.Danger),
+        ),
       ),
-    )
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        [mention || null, `# Оплата VIP · ${pkg.label}`].filter(Boolean).join("\n"),
-      ),
-    )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
-    )
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        [
-          "## 1. Перевод",
-          `Сумма: **${pkg.price} ₽**`,
-          `ЮMoney: \`${config.yoomoneyWallet}\``,
-          "",
-          "```",
-          paymentDetailsText(pkg),
-          "```",
-        ].join("\n"),
-      ),
-    )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
-    )
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        [
-          "## 2. Чек",
-          "Прикрепи **скрин перевода** в этот канал.",
-          "Должны быть видны **сумма** и **кошелёк**.",
-          "",
-          "## 3. Выдача",
-          "Админ проверит чек и выдаст VIP на **WARDOGS RUSSIA**.",
-          "",
-          "_Админ:_ `/vip-grant steam_id:...` — игрок и срок из тикета.",
-        ].join("\n"),
-      ),
-    )
-    .addActionRowComponents(
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(CUSTOM.showPay)
-          .setLabel("Скопировать реквизиты")
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId(CUSTOM.closeTicket)
-          .setLabel("Закрыть тикет")
-          .setStyle(ButtonStyle.Danger),
-      ),
-    );
+  );
 
-  return {
-    components: [container],
-    flags: MessageFlags.IsComponentsV2,
-  };
+  return messageWithBanner(container);
 }
 
 export async function openPaymentTicket(interaction, days) {
