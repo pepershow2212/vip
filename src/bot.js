@@ -20,7 +20,7 @@ import {
   grantRevokeComponents,
   handleCloseTicket,
   handleShowPay,
-  logsAdminPanelPayload,
+  keepLogsAdminPanelBottom,
   openPaymentTicket,
   panelPayload,
   revokeSelectPayload,
@@ -120,6 +120,7 @@ async function sendGrantLog(guild, { result, targetId, actorId, ticketChannelId 
     ],
     components: grantRevokeComponents(result.vipId),
   });
+  await keepLogsAdminPanelBottom(channel);
 }
 
 async function sendRevokeLog(guild, embed, content) {
@@ -127,6 +128,7 @@ async function sendRevokeLog(guild, embed, content) {
   const channel = await guild.channels.fetch(config.logChannelId).catch(() => null);
   if (!channel?.isTextBased()) return;
   await channel.send({ content, embeds: [embed] });
+  await keepLogsAdminPanelBottom(channel);
 }
 
 export async function handleInteraction(interaction) {
@@ -194,8 +196,10 @@ async function handleCommand(interaction) {
       return;
     }
     try {
-      await channel.send(logsAdminPanelPayload());
-      await interaction.editReply({ content: `Админ-панель VIP в ${channel}` });
+      await keepLogsAdminPanelBottom(channel);
+      await interaction.editReply({
+        content: `Админ-панель VIP закреплена внизу ${channel}`,
+      });
     } catch (error) {
       console.error("vip-logs-panel send", error);
       await interaction.editReply({
@@ -308,6 +312,7 @@ async function handleCommand(interaction) {
           content: `Проверка БД · <@${interaction.user.id}>`,
           embeds: [embed],
         });
+        await keepLogsAdminPanelBottom(logChannel);
       }
     }
 
@@ -547,6 +552,9 @@ async function handleButton(interaction) {
       content: `Проверка БД · <@${interaction.user.id}>`,
       embeds: [embed],
     });
+    if (config.logChannelId && interaction.channelId === config.logChannelId) {
+      await keepLogsAdminPanelBottom(interaction.channel);
+    }
     return;
   }
 

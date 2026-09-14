@@ -18,7 +18,10 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PACKAGES, config } from "./config.js";
-import { closeTicket, createTicket, getTicket } from "./db.js";
+import { closeTicket, createTicket, deleteMeta, getMeta, getTicket, setMeta } from "./db.js";
+
+const LOGS_PANEL_META_KEY = "logs_admin_panel_message_id";
+let logsPanelQueue = Promise.resolve();
 
 export const CUSTOM = {
   buySelect: "vip:buy_select",
@@ -166,6 +169,64 @@ export function logsAdminPanelPayload() {
     components: [container],
     flags: MessageFlags.IsComponentsV2,
   };
+}
+
+function componentTreeHasCustomId(components, customIds) {
+  const want = new Set(customIds);
+  const walk = (nodes) => {
+    for (const node of nodes || []) {
+      const id = node?.customId ?? node?.data?.custom_id;
+      if (id && want.has(id)) return true;
+      if (node?.components?.length && walk(node.components)) return true;
+    }
+    return false;
+  };
+  return walk(components);
+}
+
+function isLogsAdminPanelMessage(message) {
+  return componentTreeHasCustomId(message?.components, [CUSTOM.revokeMenu, CUSTOM.dbRefresh]);
+}
+
+/**
+ * Держит админ-панель последним сообщением в канале логов:
+ * удаляет старые панели и шлёт новую вниз.
+ */
+export function keepLogsAdminPanelBottom(channel) {
+  if (!channel?.isTextBased?.()) return Promise.resolve(null);
+  logsPanelQueue = logsPanelQueue
+    .then(() => relocateLogsAdminPanel(channel))
+    .catch((error) => {
+      console.error("logs admin panel pin", error instanceof Error ? error.message : error);
+      return null;
+    });
+  return logsPanelQueue;
+}
+
+async function relocateLogsAdminPanel(channel) {
+  const knownId = getMeta(LOGS_PANEL_META_KEY);
+  const toDelete = new Set();
+  if (knownId) toDelete.add(String(knownId));
+
+  try {
+    const recent = await channel.messages.fetch({ limit: 40 });
+    for (const msg of recent.values()) {
+      if (msg.author?.id === channel.client.user?.id && isLogsAdminPanelMessage(msg)) {
+        toDelete.add(msg.id);
+      }
+    }
+  } catch (error) {
+    console.warn("logs panel scan", error instanceof Error ? error.message : error);
+  }
+
+  for (const id of toDelete) {
+    await channel.messages.delete(id).catch(() => {});
+  }
+  deleteMeta(LOGS_PANEL_META_KEY);
+
+  const sent = await channel.send(logsAdminPanelPayload());
+  setMeta(LOGS_PANEL_META_KEY, sent.id);
+  return sent;
 }
 
 export function grantRevokeComponents(vipId) {

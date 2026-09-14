@@ -1,5 +1,6 @@
 import { listExpiredActive, listExpiringSoon, markReminderSent, logVipAction } from "./db.js";
 import { config } from "./config.js";
+import { keepLogsAdminPanelBottom } from "./panel.js";
 import { formatExpires, isPermanentVip, revokeLogEmbed, revokeVip } from "./vip.js";
 
 const TICK_MS = 60_000;
@@ -67,6 +68,7 @@ async function processExpiries(client) {
     ? await guild.channels.fetch(config.logChannelId).catch(() => null)
     : null;
 
+  let wroteLog = false;
   for (const vip of rows) {
     try {
       await revokeVip({ guild, vipRow: vip, actorId: null, reason: "expired" });
@@ -75,6 +77,7 @@ async function processExpiries(client) {
           content: `VIP истёк · <@${vip.discord_id}>`,
           embeds: [revokeLogEmbed({ vip, actorId: null, reason: "expired" })],
         });
+        wroteLog = true;
       }
       const user = await client.users.fetch(vip.discord_id).catch(() => null);
       if (user) {
@@ -85,5 +88,8 @@ async function processExpiries(client) {
     } catch (error) {
       console.error("vip expire", vip.id, error);
     }
+  }
+  if (wroteLog) {
+    await keepLogsAdminPanelBottom(logChannel);
   }
 }

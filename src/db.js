@@ -52,8 +52,31 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_vips_active ON vips(active, expires_at);
     CREATE INDEX IF NOT EXISTS idx_vips_discord ON vips(discord_id, active);
     CREATE INDEX IF NOT EXISTS idx_vips_steam ON vips(steam_id, active);
+
+    CREATE TABLE IF NOT EXISTS bot_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
   return db;
+}
+
+export function getMeta(key) {
+  const row = getDb().prepare(`SELECT value FROM bot_meta WHERE key = ?`).get(String(key));
+  return row?.value ?? null;
+}
+
+export function setMeta(key, value) {
+  getDb()
+    .prepare(
+      `INSERT INTO bot_meta (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    )
+    .run(String(key), String(value));
+}
+
+export function deleteMeta(key) {
+  getDb().prepare(`DELETE FROM bot_meta WHERE key = ?`).run(String(key));
 }
 
 export function logVipAction({ action, vipId, discordId, steamId, days, expiresAt, actorId, details }) {
