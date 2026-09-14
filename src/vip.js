@@ -8,7 +8,7 @@ import {
   logVipAction,
   countActiveVips,
 } from "./db.js";
-import { reserveOnEach } from "./rcon.js";
+import { reserveOnEach, rollbackAddedSlots } from "./rcon.js";
 
 const STEAM_RE = /^7656119\d{10}$/;
 
@@ -79,8 +79,8 @@ async function takeVipRole(guild, discordId) {
 }
 
 /**
- * Выдаёт VIP: reserved slots на всех серверах + роль Discord + запись в БД/лог.
- * Если VIP уже есть — продлевает от текущей даты окончания.
+ * Выдаёт VIP: сначала RCON на все серверы, потом БД/роль.
+ * При сбое RCON откатывает новые ADD и не трогает старую запись VIP.
  */
 export async function grantVip({
   guild,
@@ -108,7 +108,6 @@ export async function grantVip({
     throw new Error(`Этот SteamID уже привязан к VIP <@${existingSteam.discord_id}>`);
   }
 
-  // Продление / ADMIN навсегда не занимает новый слот, если VIP уже есть
   if (!existingDiscord) {
     const active = countActiveVips();
     if (active >= config.vipMaxSlots) {
@@ -122,6 +121,34 @@ export async function grantVip({
     const prevEnd = new Date(existingDiscord.expires_at);
     if (prevEnd > startsAt && !isPermanentVip(existingDiscord)) startsAt = prevEnd;
   }
+
+  const oldSteam = existingDiscord ? String(existingDiscord.steam_id) : null;
+  const steamChanged = Boolean(oldSteam && oldSteam !== steam);
+
+  // 1) Сначала пишем новый SteamID на все серверы — БД ещё не трогаем
+  const rconResults = await reserveOnEach(servers, steam, true);
+  const rconOk = rconResults.every((r) => r.ok);
+  if (!rconOk) {
+    await rollbackAddedSlots(servers, steam, rconResults);
+    throw new Error(`RCON не записал на все серверы:\n${resultsSummary(rconResults)}`);
+  }
+
+  // 2) Если Steam сменился — снимаем старый (после успешной записи нового)
+  let oldDropResults = [];
+  if (steamChanged) {
+    oldDropResults = await reserveOnEach(servers, oldSteam, false);
+    if (!oldDropResults.every((r) => r.ok)) {
+      console.warn("grant: old steam drop incomplete", resultsSummary(oldDropResults));
+    }
+  }
+
+  const expiresIso = permanent
+    ? PERMANENT_EXPIRES
+    : isoFromDate(new Date(startsAt.getTime() + dayCount * 86400000));
+  const startsIso = isoFromDate(now);
+  const storeDays = permanent ? -1 : dayCount;
+
+  // 3) Только после успешного RCON — закрываем старую запись и пишем новую
   if (existingDiscord) {
     deactivateVip(existingDiscord.id, permanent ? "admin_permanent" : "extended");
     logVipAction({
@@ -134,21 +161,6 @@ export async function grantVip({
       actorId,
       details: { reason: permanent ? "admin_permanent" : "extended" },
     });
-    if (String(existingDiscord.steam_id) !== steam) {
-      await reserveOnEach(servers, existingDiscord.steam_id, false);
-    }
-  }
-
-  const expiresIso = permanent
-    ? PERMANENT_EXPIRES
-    : isoFromDate(new Date(startsAt.getTime() + dayCount * 86400000));
-  const startsIso = isoFromDate(now);
-  const storeDays = permanent ? -1 : dayCount;
-
-  const rconResults = await reserveOnEach(servers, steam, true);
-  const rconOk = rconResults.every((r) => r.ok);
-  if (!rconOk) {
-    throw new Error(`RCON не записал на все серверы:\n${resultsSummary(rconResults)}`);
   }
 
   const role = await giveVipRole(guild, discordId);
@@ -178,6 +190,7 @@ export async function grantVip({
     details: {
       price: permanent ? 0 : price,
       servers: rconResults,
+      oldDrop: oldDropResults,
       roleOk: role.ok,
       extended: Boolean(existingDiscord),
       permanent,
@@ -198,9 +211,21 @@ export async function grantVip({
   };
 }
 
+/**
+ * Снимает VIP: сначала RCON на все серверы.
+ * При сбое RCON БД и роль не трогаем — можно повторить снятие.
+ */
 export async function revokeVip({ guild, vipRow, actorId, reason = "manual" }) {
   const servers = vipServers();
+  if (!servers.length) {
+    throw new Error("Нет настроенных SERVER_*_RCON_* — снятие VIP невозможно");
+  }
+
   const rconResults = await reserveOnEach(servers, vipRow.steam_id, false);
+  if (!rconResults.every((r) => r.ok)) {
+    throw new Error(`RCON не снял со всех серверов:\n${resultsSummary(rconResults)}`);
+  }
+
   await takeVipRole(guild, vipRow.discord_id).catch((err) => {
     console.warn("vip role remove", err instanceof Error ? err.message : err);
   });

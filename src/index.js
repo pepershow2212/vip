@@ -37,6 +37,7 @@ const client = new Client({
 client.once(Events.ClientReady, (c) => {
   const servers = vipServers();
   console.log(`VIP bot online as ${c.user.tag}`);
+  console.log(`VIP slots limit: ${config.vipMaxSlots} · DB: ${config.databasePath}`);
   console.log(
     `RCON targets (${servers.length}): ${servers.map((s) => `${s.name} ${s.host}:${s.port}`).join(" | ") || "none"}`,
   );

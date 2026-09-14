@@ -14,6 +14,7 @@ COPY index.js ./
 
 RUN mkdir -p /app/data && chmod 777 /app/data
 
+# Bothost: привяжи постоянный volume к /app/data, иначе vip.db пропадёт при redeploy.
 ENV NODE_ENV=production
 ENV DATABASE_PATH=/app/data/vip.db
 

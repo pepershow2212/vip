@@ -19,12 +19,15 @@ import {
   CUSTOM,
   grantRevokeComponents,
   handleCloseTicket,
+  handleSetSteamButton,
   handleShowPay,
+  handleSteamEditModal,
   keepLogsAdminPanelBottom,
   openPaymentTicket,
   panelPayload,
   revokeSelectPayload,
   scheduleTicketClose,
+  steamModalForPackage,
 } from "./panel.js";
 import {
   formatExpires,
@@ -48,7 +51,12 @@ export const commands = [
     .setName("vip-grant")
     .setDescription("Выдать VIP после проверки чека (в тикете user/days подставятся сами)")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-    .addStringOption((o) => o.setName("steam_id").setDescription("SteamID64").setRequired(true))
+    .addStringOption((o) =>
+      o
+        .setName("steam_id")
+        .setDescription("SteamID64 (в тикете можно не указывать — берётся из заявки)")
+        .setRequired(false),
+    )
     .addUserOption((o) =>
       o.setName("user").setDescription("Игрок Discord (не нужен, если команда в тикете)").setRequired(false),
     )
@@ -134,6 +142,10 @@ async function sendRevokeLog(guild, embed, content) {
 export async function handleInteraction(interaction) {
   if (interaction.isChatInputCommand()) {
     await handleCommand(interaction);
+    return;
+  }
+  if (interaction.isModalSubmit()) {
+    await handleModal(interaction);
     return;
   }
   if (interaction.isStringSelectMenu()) {
@@ -331,7 +343,8 @@ async function handleCommand(interaction) {
 
     const ticket = getTicket(interaction.channelId);
     const fromTopic = parseTicketTopic(interaction.channel?.topic);
-    const steamId = interaction.options.getString("steam_id", true).trim();
+    const steamOpt = interaction.options.getString("steam_id")?.trim();
+    const steamId = steamOpt || ticket?.steam_id || null;
     const userOpt = interaction.options.getUser("user");
     const daysOpt = interaction.options.getInteger("days");
     const discordId = userOpt?.id || ticket?.discord_id || fromTopic?.discordId;
@@ -349,6 +362,14 @@ async function handleCommand(interaction) {
     if (days == null || !pkg) {
       await interaction.reply({
         content: "Укажи `days` (7 / 30 / 90 / ADMIN навсегда) или выполни команду в тикете.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    if (!steamId) {
+      await interaction.reply({
+        content:
+          "Нет SteamID: укажи `steam_id` или попроси игрока нажать **Изменить SteamID** в тикете.",
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -469,10 +490,26 @@ async function executeRevoke(interaction, vip) {
   );
 }
 
+async function handleModal(interaction) {
+  if (interaction.customId === CUSTOM.steamEditModal) {
+    await handleSteamEditModal(interaction);
+    return;
+  }
+  if (interaction.customId.startsWith("vip:ticket_steam:")) {
+    const days = Number(interaction.customId.split(":")[2]);
+    const steam = interaction.fields.getTextInputValue("steam_id").trim();
+    await openPaymentTicket(interaction, days, steam);
+  }
+}
+
 async function handleSelect(interaction) {
   if (interaction.customId === CUSTOM.buySelect) {
     const days = Number(interaction.values[0]);
-    await openPaymentTicket(interaction, days);
+    if (!packageOf(days)) {
+      await interaction.reply({ content: "Неизвестный тариф.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.showModal(steamModalForPackage(days));
     return;
   }
 
@@ -512,6 +549,11 @@ async function handleButton(interaction) {
 
   if (id === CUSTOM.showPay) {
     await handleShowPay(interaction);
+    return;
+  }
+
+  if (id === CUSTOM.setSteam) {
+    await handleSetSteamButton(interaction);
     return;
   }
 

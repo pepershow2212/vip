@@ -8,17 +8,30 @@ import {
   MediaGalleryBuilder,
   MediaGalleryItemBuilder,
   MessageFlags,
+  ModalBuilder,
   PermissionFlagsBits,
   SeparatorBuilder,
   SeparatorSpacingSize,
   StringSelectMenuBuilder,
   TextDisplayBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } from "discord.js";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PACKAGES, config } from "./config.js";
-import { closeTicket, createTicket, deleteMeta, getMeta, getTicket, setMeta } from "./db.js";
+import {
+  closeTicket,
+  createTicket,
+  deleteMeta,
+  getMeta,
+  getOpenTicketByDiscord,
+  getTicket,
+  setMeta,
+  setTicketSteamId,
+} from "./db.js";
+import { isSteamId64 } from "./vip.js";
 
 const LOGS_PANEL_META_KEY = "logs_admin_panel_message_id";
 let logsPanelQueue = Promise.resolve();
@@ -28,6 +41,9 @@ export const CUSTOM = {
   status: "vip:status",
   closeTicket: "vip:close",
   showPay: "vip:show_pay",
+  setSteam: "vip:set_steam",
+  steamModal: (days) => `vip:ticket_steam:${days}`,
+  steamEditModal: "vip:ticket_steam_edit",
   revokeMenu: "vip:revoke_menu",
   revokeSelect: "vip:revoke_select",
   revokeId: (vipId) => `vip:revoke:${vipId}`,
@@ -298,6 +314,17 @@ function ticketOverwrites(guild, userId) {
       ],
     });
   }
+  for (const adminId of config.adminUserIds) {
+    overwrites.push({
+      id: adminId,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.ManageMessages,
+      ],
+    });
+  }
   return overwrites;
 }
 
@@ -309,7 +336,47 @@ export function paymentDetailsText(pkg) {
   ].join("\n");
 }
 
-export function paymentPayload(pkg, { mention = "" } = {}) {
+export function steamModalForPackage(days) {
+  const pkg = PACKAGES[String(days)];
+  return new ModalBuilder()
+    .setCustomId(CUSTOM.steamModal(days))
+    .setTitle(`VIP · ${pkg?.label || "тариф"}`)
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("steam_id")
+          .setLabel("Твой SteamID64")
+          .setPlaceholder("7656119xxxxxxxxxx")
+          .setStyle(TextInputStyle.Short)
+          .setMinLength(17)
+          .setMaxLength(17)
+          .setRequired(true),
+      ),
+    );
+}
+
+export function steamEditModal(currentSteam = "") {
+  const input = new TextInputBuilder()
+    .setCustomId("steam_id")
+    .setLabel("Твой SteamID64")
+    .setPlaceholder("7656119xxxxxxxxxx")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(17)
+    .setMaxLength(17)
+    .setRequired(true);
+  if (currentSteam && isSteamId64(currentSteam)) {
+    input.setValue(String(currentSteam));
+  }
+  return new ModalBuilder()
+    .setCustomId(CUSTOM.steamEditModal)
+    .setTitle("Указать SteamID64")
+    .addComponents(new ActionRowBuilder().addComponents(input));
+}
+
+export function paymentPayload(pkg, { mention = "", steamId = "" } = {}) {
+  const steamLine = steamId
+    ? `SteamID64: \`${steamId}\``
+    : "SteamID64: _не указан — нажми кнопку ниже_";
   const container = withBanner(
     new ContainerBuilder()
       .setAccentColor(ACCENT)
@@ -324,7 +391,10 @@ export function paymentPayload(pkg, { mention = "" } = {}) {
       .addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
           [
-            "## 1. Перевод",
+            "## 1. SteamID",
+            steamLine,
+            "",
+            "## 2. Перевод",
             `Сумма: **${pkg.price} ₽**`,
             `ЮMoney: \`${config.yoomoneyWallet}\``,
             "",
@@ -340,14 +410,14 @@ export function paymentPayload(pkg, { mention = "" } = {}) {
       .addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
           [
-            "## 2. Чек",
+            "## 3. Чек",
             "Прикрепи **скрин перевода** в этот канал.",
             "Должны быть видны **сумма** и **кошелёк**.",
             "",
-            "## 3. Выдача",
+            "## 4. Выдача",
             "Админ проверит чек и выдаст VIP на **WARDOGS RUSSIA**.",
             "",
-            "_Админ:_ `/vip-grant steam_id:...` — игрок и срок из тикета.",
+            "_Админ:_ `/vip-grant` в этом тикете — SteamID, игрок и срок из тикета.",
           ].join("\n"),
         ),
       )
@@ -357,6 +427,10 @@ export function paymentPayload(pkg, { mention = "" } = {}) {
             .setCustomId(CUSTOM.showPay)
             .setLabel("Скопировать реквизиты")
             .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId(CUSTOM.setSteam)
+            .setLabel("Изменить SteamID")
+            .setStyle(ButtonStyle.Secondary),
           new ButtonBuilder()
             .setCustomId(CUSTOM.closeTicket)
             .setLabel("Закрыть тикет")
@@ -368,10 +442,19 @@ export function paymentPayload(pkg, { mention = "" } = {}) {
   return messageWithBanner(container);
 }
 
-export async function openPaymentTicket(interaction, days) {
+export async function openPaymentTicket(interaction, days, steamId) {
   const pkg = PACKAGES[String(days)];
   if (!pkg) {
     await interaction.reply({ content: "Неизвестный тариф.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const steam = String(steamId || "").trim();
+  if (!isSteamId64(steam)) {
+    await interaction.reply({
+      content: "SteamID64 должен быть вида `7656119xxxxxxxxxx` (17 цифр).",
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
 
@@ -381,6 +464,19 @@ export async function openPaymentTicket(interaction, days) {
       flags: MessageFlags.Ephemeral,
     });
     return;
+  }
+
+  const openDb = getOpenTicketByDiscord(interaction.user.id);
+  if (openDb) {
+    const ch = await interaction.guild.channels.fetch(openDb.channel_id).catch(() => null);
+    if (ch) {
+      await interaction.reply({
+        content: `У тебя уже есть открытый тикет: ${ch}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    closeTicket(openDb.channel_id, "closed");
   }
 
   const existing = interaction.guild.channels.cache.find(
@@ -416,12 +512,75 @@ export async function openPaymentTicket(interaction, days) {
     discordId: interaction.user.id,
     packageDays: pkg.days,
     price: pkg.price,
+    steamId: steam,
   });
 
   const mention = `${interaction.user}${config.adminRoleIds.map((id) => ` <@&${id}>`).join("")}`;
-  await channel.send(paymentPayload(pkg, { mention }));
+  await channel.send(paymentPayload(pkg, { mention, steamId: steam }));
 
   await interaction.editReply({ content: `Тикет создан: ${channel}` });
+}
+
+export async function handleSetSteamButton(interaction) {
+  const ticket = getTicket(interaction.channelId);
+  const isOwner = ticket && ticket.discord_id === interaction.user.id;
+  const isAdmin =
+    config.adminUserIds.includes(interaction.user.id) ||
+    interaction.member?.roles?.cache?.some((r) => config.adminRoleIds.includes(r.id)) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
+
+  if (!isOwner && !isAdmin) {
+    await interaction.reply({
+      content: "SteamID может менять только автор тикета или админ.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  if (!ticket || ticket.status !== "open") {
+    await interaction.reply({
+      content: "Тикет не найден или уже закрыт.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  await interaction.showModal(steamEditModal(ticket.steam_id || ""));
+}
+
+export async function handleSteamEditModal(interaction) {
+  const ticket = getTicket(interaction.channelId);
+  if (!ticket || ticket.status !== "open") {
+    await interaction.reply({
+      content: "Тикет не найден или уже закрыт.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  const isOwner = ticket.discord_id === interaction.user.id;
+  const isAdmin =
+    config.adminUserIds.includes(interaction.user.id) ||
+    interaction.member?.roles?.cache?.some((r) => config.adminRoleIds.includes(r.id)) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
+  if (!isOwner && !isAdmin) {
+    await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const steam = interaction.fields.getTextInputValue("steam_id").trim();
+  if (!isSteamId64(steam)) {
+    await interaction.reply({
+      content: "SteamID64 должен быть вида `7656119xxxxxxxxxx`.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  setTicketSteamId(ticket.channel_id, steam);
+  const pkg = PACKAGES[String(ticket.package_days)];
+  await interaction.reply({
+    content: `SteamID обновлён: \`${steam}\`${pkg ? `\nАдмин: \`/vip-grant\` (можно без steam_id).` : ""}`,
+  });
 }
 
 export async function handleShowPay(interaction) {
@@ -505,6 +664,16 @@ export async function archiveTicketChannel(channel, { status = "granted", reason
   for (const roleId of config.adminRoleIds) {
     overwrites.push({
       id: roleId,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.SendMessages,
+      ],
+    });
+  }
+  for (const adminId of config.adminUserIds) {
+    overwrites.push({
+      id: adminId,
       allow: [
         PermissionFlagsBits.ViewChannel,
         PermissionFlagsBits.ReadMessageHistory,

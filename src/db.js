@@ -45,6 +45,7 @@ export function getDb() {
       package_days INTEGER NOT NULL,
       price INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'open',
+      steam_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       closed_at TEXT
     );
@@ -52,13 +53,22 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_vips_active ON vips(active, expires_at);
     CREATE INDEX IF NOT EXISTS idx_vips_discord ON vips(discord_id, active);
     CREATE INDEX IF NOT EXISTS idx_vips_steam ON vips(steam_id, active);
+    CREATE INDEX IF NOT EXISTS idx_tickets_open_discord ON tickets(discord_id, status);
 
     CREATE TABLE IF NOT EXISTS bot_meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
   `);
+  migrateTicketsSteamId(db);
   return db;
+}
+
+function migrateTicketsSteamId(database) {
+  const cols = database.prepare(`PRAGMA table_info(tickets)`).all();
+  if (!cols.some((c) => c.name === "steam_id")) {
+    database.exec(`ALTER TABLE tickets ADD COLUMN steam_id TEXT`);
+  }
 }
 
 export function getMeta(key) {
@@ -97,17 +107,36 @@ export function logVipAction({ action, vipId, discordId, steamId, days, expiresA
     });
 }
 
-export function createTicket({ channelId, discordId, packageDays, price }) {
+export function createTicket({ channelId, discordId, packageDays, price, steamId = null }) {
   getDb()
     .prepare(
-      `INSERT INTO tickets (channel_id, discord_id, package_days, price, status)
-       VALUES (?, ?, ?, ?, 'open')`,
+      `INSERT INTO tickets (channel_id, discord_id, package_days, price, status, steam_id)
+       VALUES (?, ?, ?, ?, 'open', ?)`,
     )
-    .run(channelId, discordId, packageDays, price);
+    .run(channelId, discordId, packageDays, price, steamId ? String(steamId) : null);
 }
 
 export function getTicket(channelId) {
   return getDb().prepare(`SELECT * FROM tickets WHERE channel_id = ?`).get(channelId) || null;
+}
+
+export function getOpenTicketByDiscord(discordId) {
+  return (
+    getDb()
+      .prepare(
+        `SELECT * FROM tickets
+         WHERE discord_id = ? AND status = 'open'
+         ORDER BY datetime(created_at) DESC
+         LIMIT 1`,
+      )
+      .get(String(discordId)) || null
+  );
+}
+
+export function setTicketSteamId(channelId, steamId) {
+  getDb()
+    .prepare(`UPDATE tickets SET steam_id = ? WHERE channel_id = ?`)
+    .run(String(steamId), String(channelId));
 }
 
 export function closeTicket(channelId, status = "closed") {

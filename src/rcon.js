@@ -233,9 +233,16 @@ export async function reserveOnEach(servers, steamId, on) {
   const results = [];
   for (const server of servers || []) {
     try {
-      if (on) await addReservedSlot(server, steamId);
-      else await dropReservedSlot(server, steamId);
-      results.push({ id: server.id, name: server.name, ok: true });
+      const detail = on
+        ? await addReservedSlot(server, steamId)
+        : await dropReservedSlot(server, steamId);
+      results.push({
+        id: server.id,
+        name: server.name,
+        ok: true,
+        already: Boolean(detail?.already),
+        missing: Boolean(detail?.missing),
+      });
     } catch (error) {
       console.warn("reserve", server.name, error instanceof Error ? error.message : error);
       results.push({
@@ -247,4 +254,23 @@ export async function reserveOnEach(servers, steamId, on) {
     }
   }
   return results;
+}
+
+/** Откатывает успешные ADD (только те, где ID реально дописали, не «уже был»). */
+export async function rollbackAddedSlots(servers, steamId, addResults) {
+  const byId = new Map((servers || []).map((s) => [String(s.id), s]));
+  for (const row of addResults || []) {
+    if (!row.ok || row.already) continue;
+    const server = byId.get(String(row.id));
+    if (!server) continue;
+    try {
+      await dropReservedSlot(server, steamId);
+    } catch (error) {
+      console.warn(
+        "rollback add",
+        server.name,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
 }
