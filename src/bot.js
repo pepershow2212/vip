@@ -151,6 +151,8 @@ async function handleCommand(interaction) {
       await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
       return;
     }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const servers = vipServers();
     const targetId = config.panelChannelId || interaction.channelId;
     const channel =
@@ -158,17 +160,22 @@ async function handleCommand(interaction) {
         ? interaction.channel
         : await interaction.guild.channels.fetch(targetId).catch(() => null);
     if (!channel?.isTextBased()) {
-      await interaction.reply({
+      await interaction.editReply({
         content: `Канал панели не найден: \`${targetId}\``,
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
-    await channel.send(panelPayload());
-    await interaction.reply({
-      content: `Панель в ${channel}. RCON: **${servers.length}** · VIP слотов: **${countActiveVips()}/${config.vipMaxSlots}**`,
-      flags: MessageFlags.Ephemeral,
-    });
+    try {
+      await channel.send(panelPayload());
+      await interaction.editReply({
+        content: `Панель в ${channel}. RCON: **${servers.length}** · VIP слотов: **${countActiveVips()}/${config.vipMaxSlots}**`,
+      });
+    } catch (error) {
+      console.error("vip-panel send", error);
+      await interaction.editReply({
+        content: `Не удалось отправить панель: ${error instanceof Error ? error.message : error}`,
+      });
+    }
     return;
   }
 
@@ -177,19 +184,24 @@ async function handleCommand(interaction) {
       await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
       return;
     }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const channel = await interaction.guild.channels.fetch(config.logChannelId).catch(() => null);
     if (!channel?.isTextBased()) {
-      await interaction.reply({
+      await interaction.editReply({
         content: `Канал логов не найден: \`${config.logChannelId}\``,
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
-    await channel.send(logsAdminPanelPayload());
-    await interaction.reply({
-      content: `Админ-панель VIP в ${channel}`,
-      flags: MessageFlags.Ephemeral,
-    });
+    try {
+      await channel.send(logsAdminPanelPayload());
+      await interaction.editReply({ content: `Админ-панель VIP в ${channel}` });
+    } catch (error) {
+      console.error("vip-logs-panel send", error);
+      await interaction.editReply({
+        content: `Не удалось отправить: ${error instanceof Error ? error.message : error}`,
+      });
+    }
     return;
   }
 

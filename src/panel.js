@@ -14,7 +14,7 @@ import {
   StringSelectMenuBuilder,
   TextDisplayBuilder,
 } from "discord.js";
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PACKAGES, config } from "./config.js";
@@ -37,11 +37,15 @@ const BANNER_NAME = "wardogs-vip-banner.webp";
 const BANNER_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "assets", "banner.webp");
 
 function bannerAttachment() {
-  if (!existsSync(BANNER_PATH)) return null;
-  return new AttachmentBuilder(readFileSync(BANNER_PATH), { name: BANNER_NAME });
+  if (!existsSync(BANNER_PATH)) {
+    console.warn("banner missing:", BANNER_PATH);
+    return null;
+  }
+  return new AttachmentBuilder(BANNER_PATH, { name: BANNER_NAME });
 }
 
 function withBanner(container) {
+  if (!existsSync(BANNER_PATH)) return container;
   return container.addMediaGalleryComponents(
     new MediaGalleryBuilder().addItems(
       new MediaGalleryItemBuilder().setURL(`attachment://${BANNER_NAME}`),
