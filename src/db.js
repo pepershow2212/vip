@@ -178,3 +178,24 @@ export function countActiveVips() {
     )
     .get().n;
 }
+
+export function listActiveVips(limit = 50) {
+  return getDb()
+    .prepare(
+      `SELECT * FROM vips
+       WHERE active = 1 AND datetime(expires_at) > datetime('now')
+       ORDER BY datetime(expires_at) ASC
+       LIMIT ?`,
+    )
+    .all(Math.max(1, Math.min(Number(limit) || 50, 100)));
+}
+
+export function listVipHistory(limit = 20) {
+  return getDb()
+    .prepare(
+      `SELECT * FROM vip_logs
+       ORDER BY id DESC
+       LIMIT ?`,
+    )
+    .all(Math.max(1, Math.min(Number(limit) || 20, 50)));
+}

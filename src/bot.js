@@ -2,9 +2,17 @@ import {
   SlashCommandBuilder,
   PermissionFlagsBits,
   MessageFlags,
+  EmbedBuilder,
 } from "discord.js";
 import { config, vipServers } from "./config.js";
-import { getActiveVipByDiscord, getActiveVipBySteam, getTicket, countActiveVips } from "./db.js";
+import {
+  getActiveVipByDiscord,
+  getActiveVipBySteam,
+  getTicket,
+  countActiveVips,
+  listActiveVips,
+  listVipHistory,
+} from "./db.js";
 import { isVipAdmin } from "./permissions.js";
 import {
   CUSTOM,
@@ -15,6 +23,7 @@ import {
   scheduleTicketClose,
 } from "./panel.js";
 import {
+  formatExpires,
   grantLogEmbed,
   grantVip,
   isSteamId64,
@@ -56,6 +65,20 @@ export const commands = [
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addUserOption((o) => o.setName("user").setDescription("Игрок Discord").setRequired(false))
     .addStringOption((o) => o.setName("steam_id").setDescription("SteamID64").setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName("vip-db")
+    .setDescription("Админ: проверить VIP в базе (список уходит в лог-канал)")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addUserOption((o) =>
+      o.setName("user").setDescription("Проверить конкретного игрока").setRequired(false),
+    )
+    .addStringOption((o) =>
+      o.setName("steam_id").setDescription("Или SteamID64").setRequired(false),
+    )
+    .addBooleanOption((o) =>
+      o.setName("post_log").setDescription("Дублировать в канал логов (по умолчанию да)").setRequired(false),
+    ),
 
   new SlashCommandBuilder()
     .setName("vip-status")
@@ -148,6 +171,105 @@ async function handleCommand(interaction) {
     }
     const vip = getActiveVipByDiscord(target.id);
     await interaction.reply({ embeds: [statusEmbed(vip)], flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (name === "vip-db") {
+    if (!isVipAdmin(interaction.member, interaction.user.id)) {
+      await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const user = interaction.options.getUser("user");
+    const steamId = interaction.options.getString("steam_id")?.trim();
+    const postLog = interaction.options.getBoolean("post_log");
+    const shouldPost = postLog !== false;
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    let embed;
+    if (user || steamId) {
+      const vip = user ? getActiveVipByDiscord(user.id) : getActiveVipBySteam(steamId);
+      if (!vip) {
+        embed = new EmbedBuilder()
+          .setColor(0x8b7355)
+          .setTitle("VIP в базе")
+          .setDescription(
+            user
+              ? `Активного VIP у <@${user.id}> нет.`
+              : `Активного VIP для \`${steamId}\` нет.`,
+          )
+          .addFields({
+            name: "Слоты",
+            value: `${countActiveVips()}/${config.vipMaxSlots}`,
+            inline: true,
+          });
+      } else {
+        embed = new EmbedBuilder()
+          .setColor(0xc4a574)
+          .setTitle(`VIP #${vip.id} в базе`)
+          .addFields(
+            { name: "Discord", value: `<@${vip.discord_id}>`, inline: true },
+            { name: "SteamID64", value: `\`${vip.steam_id}\``, inline: true },
+            { name: "Срок", value: `${vip.days} дн.`, inline: true },
+            { name: "До", value: formatExpires(vip.expires_at), inline: false },
+            { name: "Цена", value: `${vip.price || 0} ₽`, inline: true },
+            {
+              name: "Выдал",
+              value: vip.granted_by ? `<@${vip.granted_by}>` : "—",
+              inline: true,
+            },
+            {
+              name: "Тикет",
+              value: vip.ticket_channel_id
+                ? `[открыть](https://discord.com/channels/${interaction.guildId}/${vip.ticket_channel_id})`
+                : "—",
+              inline: true,
+            },
+          )
+          .setFooter({ text: `Активных: ${countActiveVips()}/${config.vipMaxSlots}` });
+      }
+    } else {
+      const rows = listActiveVips(50);
+      const lines = rows.length
+        ? rows.map(
+            (v, i) =>
+              `${i + 1}. <@${v.discord_id}> · \`${v.steam_id}\` · ${v.days}д · до ${formatExpires(v.expires_at)}`,
+          )
+        : ["Активных VIP нет."];
+
+      // Discord embed description max 4096
+      let body = lines.join("\n");
+      if (body.length > 3900) body = `${body.slice(0, 3900)}\n…`;
+
+      const history = listVipHistory(8)
+        .map((h) => `\`${h.action}\` <@${h.discord_id || "?"}> · \`${h.steam_id || "—"}\``)
+        .join("\n");
+
+      embed = new EmbedBuilder()
+        .setColor(0xc4a574)
+        .setTitle(`VIP база · ${countActiveVips()}/${config.vipMaxSlots}`)
+        .setDescription(body)
+        .setTimestamp();
+      if (history) {
+        embed.addFields({ name: "Последние действия", value: history.slice(0, 1000) });
+      }
+    }
+
+    if (shouldPost && config.logChannelId) {
+      const logChannel = await interaction.guild.channels.fetch(config.logChannelId).catch(() => null);
+      if (logChannel?.isTextBased()) {
+        await logChannel.send({
+          content: `Проверка БД · <@${interaction.user.id}>`,
+          embeds: [embed],
+        });
+      }
+    }
+
+    await interaction.editReply({
+      content: shouldPost ? `Отчёт отправлен в <#${config.logChannelId}>.` : "Только тебе:",
+      embeds: [embed],
+    });
     return;
   }
 

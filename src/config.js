@@ -56,7 +56,7 @@ export const config = {
   // Категория тикетов оплаты
   ticketCategoryId: env("TICKET_CATEGORY_ID", "1490790855512952848"),
   // Куда переносить закрытые тикеты (опционально)
-  archiveCategoryId: env("ARCHIVE_CATEGORY_ID", ""),
+  archiveCategoryId: env("ARCHIVE_CATEGORY_ID", "1549146851058655272"),
   logChannelId: env("LOG_CHANNEL_ID", "1549139317404999790"),
   yoomoneyWallet: env("YOOMONEY_WALLET", "4100119612206096"),
   vipMaxSlots: Math.max(1, Number(env("VIP_MAX_SLOTS", "50")) || 50),
