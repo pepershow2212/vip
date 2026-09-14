@@ -1,9 +1,8 @@
-FROM node:20-bookworm-slim
+FROM node:20-alpine
 
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
-  && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache python3 make g++
 
-WORKDIR /usr/src/app
+WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
