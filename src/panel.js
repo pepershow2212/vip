@@ -157,7 +157,7 @@ export function revokeSelectPayload(rows) {
   if (!rows.length) {
     return {
       content: "Активных VIP в базе нет.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     };
   }
   const menu = new StringSelectMenuBuilder()
@@ -174,7 +174,7 @@ export function revokeSelectPayload(rows) {
   return {
     content: "Выбери VIP для снятия:",
     components: [new ActionRowBuilder().addComponents(menu)],
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   };
 }
 
@@ -290,14 +290,14 @@ export function paymentPayload(pkg, { mention = "" } = {}) {
 export async function openPaymentTicket(interaction, days) {
   const pkg = PACKAGES[String(days)];
   if (!pkg) {
-    await interaction.reply({ content: "Неизвестный тариф.", ephemeral: true });
+    await interaction.reply({ content: "Неизвестный тариф.", flags: MessageFlags.Ephemeral });
     return;
   }
 
   if (!config.ticketCategoryId) {
     await interaction.reply({
       content: "TICKET_CATEGORY_ID не задан в .env",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -311,12 +311,12 @@ export async function openPaymentTicket(interaction, days) {
   if (existing) {
     await interaction.reply({
       content: `У тебя уже есть открытый тикет: ${existing}`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const channel = await interaction.guild.channels.create({
     name: `${TICKET_EMOJI}｜vip-${interaction.user.username}`
@@ -350,7 +350,7 @@ export async function handleShowPay(interaction) {
   if (!pkg) {
     await interaction.reply({
       content: "Не удалось определить тариф тикета.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -361,7 +361,7 @@ export async function handleShowPay(interaction) {
       paymentDetailsText(pkg),
       "```",
     ].join("\n"),
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -378,7 +378,7 @@ export async function handleCloseTicket(interaction) {
   if (!isOwner && !isAdmin) {
     await interaction.reply({
       content: "Закрыть тикет может только автор или админ.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }

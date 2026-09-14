@@ -3,6 +3,7 @@ import {
   GatewayIntentBits,
   Partials,
   Events,
+  MessageFlags,
 } from "discord.js";
 import { config, envFileExists, vipServers } from "./config.js";
 import { getDb } from "./db.js";
@@ -52,7 +53,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     console.error("interaction", error);
     const payload = {
       content: "Ошибка обработки команды.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     };
     if (interaction.deferred || interaction.replied) {
       await interaction.followUp(payload).catch(() => {});
