@@ -108,6 +108,18 @@ export function getActiveVipById(id) {
   );
 }
 
+export function getActiveVipByDiscord(discordId) {
+  return (
+    getDb()
+      .prepare(
+        `SELECT * FROM vips
+         WHERE discord_id = ? AND active = 1 AND datetime(expires_at) > datetime('now')
+         ORDER BY datetime(expires_at) DESC LIMIT 1`,
+      )
+      .get(String(discordId)) || null
+  );
+}
+
 export function getActiveVipBySteam(steamId) {
   return (
     getDb()
