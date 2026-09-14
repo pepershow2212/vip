@@ -75,78 +75,157 @@ function reservedIdsFromConfig(text) {
   return [...String(text || "").matchAll(/^\s*[+.]DefaultReservedPlayerIds=(\d+)/gm)].map((row) => row[1]);
 }
 
-export function applyReservedIds(text, keepIds, { minSlots = 0 } = {}) {
-  const keep = [...new Set((keepIds || []).map(String).filter(Boolean))];
-  const needSlots = Math.max(Number(minSlots) || 0, keep.length);
+function uniqIds(ids) {
+  return [...new Set((ids || []).map(String).filter(Boolean))];
+}
+
+/**
+ * Переписывает только DefaultReservedPlayerIds.
+ * MaxReservedSlots и остальной конфиг не трогает.
+ */
+export function applyReservedIds(text, keepIds) {
+  const keep = uniqIds(keepIds);
   const lines = String(text || "").split(/\r?\n/);
   const without = lines.filter((line) => !/^\s*[+!.]?DefaultReservedPlayerIds=/.test(line));
-  for (let i = 0; i < without.length; i++) {
-    const match = without[i].match(/^(\s*MaxReservedSlots=)(\d+)/);
-    if (!match) continue;
-    const current = Number(match[2]) || 0;
-    if (needSlots > current) without[i] = `${match[1]}${needSlots}`;
-    break;
-  }
   const extra = ["!DefaultReservedPlayerIds=ClearArray", ...keep.map((id) => `.DefaultReservedPlayerIds=${id}`)];
   const max = without.findIndex((line) => /^\s*MaxReservedSlots=/.test(line));
   const session = without.findIndex((line) => /\[\/Script\/WDGame\.WDGameSession\]/.test(line));
   if (max >= 0) without.splice(max, 0, ...extra);
   else if (session >= 0) without.splice(session + 1, 0, ...extra);
-  else without.push("[/Script/WDGame.WDGameSession]", `MaxReservedSlots=${Math.max(needSlots, 20)}`, ...extra);
+  else without.push("[/Script/WDGame.WDGameSession]", ...extra);
   return without.join("\n");
 }
 
-async function writeReservedViaConfig(server, keepIds, { minSlots = 0 } = {}) {
+/**
+ * Собирает полный список reserved: API ∪ конфиг.
+ * Так не теряем ID, добавленные вручную в панели.
+ */
+export async function listReservedSlots(server) {
+  const fromApi = [];
+  const fromConfig = [];
+
+  try {
+    const body = await rconGet(server, "/v1/reserved-slots", 4000);
+    const ids = body?.reservedSlots || body?.steamIds || [];
+    if (Array.isArray(ids)) fromApi.push(...ids.map(String));
+  } catch {
+    // fallback to config
+  }
+
+  try {
+    const doc = await rconGet(server, "/v1/config", 6000);
+    fromConfig.push(...reservedIdsFromConfig(doc?.text || ""));
+  } catch {
+    // ignore
+  }
+
+  return uniqIds([...fromApi, ...fromConfig]);
+}
+
+async function writeReservedExact(server, beforeIds, nextIds, steamId, mode) {
+  const before = uniqIds(beforeIds);
+  const next = uniqIds(nextIds);
+  const want = String(steamId);
+
+  // Защита: кроме целевого SteamID никто не должен пропасть / появиться лишним
+  const removed = before.filter((id) => !next.includes(id));
+  const added = next.filter((id) => !before.includes(id));
+
+  if (mode === "add") {
+    if (removed.length) {
+      throw new Error(
+        `abort add ${server.name}: нельзя затереть чужие reserved (${removed.join(",")})`,
+      );
+    }
+    if (!added.includes(want) && !next.includes(want)) {
+      throw new Error(`abort add ${server.name}: целевой ID не в списке`);
+    }
+    if (added.some((id) => id !== want)) {
+      throw new Error(`abort add ${server.name}: лишние ID в записи`);
+    }
+  }
+
+  if (mode === "drop") {
+    if (removed.length !== 1 || removed[0] !== want) {
+      throw new Error(
+        `abort drop ${server.name}: снимаем только свой ID, а не [${removed.join(",")}]`,
+      );
+    }
+    if (added.length) {
+      throw new Error(`abort drop ${server.name}: неожиданные новые ID`);
+    }
+  }
+
+  // Пустой список после drop — ок только если до этого был ровно один (наш) ID
+  if (mode === "drop" && next.length === 0 && before.length > 1) {
+    throw new Error(`abort drop ${server.name}: список стал пустым, хотя были чужие ID`);
+  }
+
   const doc = await rconGet(server, "/v1/config", 8000);
-  const next = applyReservedIds(doc?.text || "", keepIds, { minSlots });
+  const configText = doc?.text || "";
+  const configIds = reservedIdsFromConfig(configText);
+
+  // Ещё раз сверяем с конфигом прямо перед записью (ручные ID из панели)
+  const live = uniqIds([...configIds, ...before]);
+  let finalIds;
+  if (mode === "add") {
+    finalIds = live.includes(want) ? live : [...live, want];
+  } else {
+    finalIds = live.filter((id) => id !== want);
+  }
+
+  // Финальная защита по live-конфигу
+  const lost = live.filter((id) => id !== want && !finalIds.includes(id));
+  if (lost.length) {
+    throw new Error(`abort ${mode} ${server.name}: потеряли чужие ID ${lost.join(",")}`);
+  }
+
+  const payload = applyReservedIds(configText, finalIds);
   await rconCall(server, "/v1/config?force=true", {
     method: "PUT",
-    raw: next,
+    raw: payload,
     timeoutMs: 15000,
     headers: { "content-type": "text/plain" },
   });
+
+  return finalIds;
 }
 
-export async function listReservedSlots(server) {
-  const body = await rconGet(server, "/v1/reserved-slots", 4000);
-  const ids = body?.reservedSlots || body?.steamIds || [];
-  if (Array.isArray(ids) && ids.length) return ids.map(String);
-  if (Array.isArray(ids)) {
-    try {
-      const doc = await rconGet(server, "/v1/config", 6000);
-      const fromConfig = reservedIdsFromConfig(doc?.text || "");
-      if (fromConfig.length) return fromConfig;
-    } catch {
-      // empty list from API is enough
-    }
-    return [];
-  }
-  const doc = await rconGet(server, "/v1/config", 6000);
-  return reservedIdsFromConfig(doc?.text || "");
-}
-
-/** Дописывает SteamID в reserved slots, чужие ID не трогает. */
-export async function addReservedSlot(server, steamId, { minSlots = 0 } = {}) {
+/** Дописывает только SteamID из базы VIP. Чужие (панель / царь) не трогает. */
+export async function addReservedSlot(server, steamId) {
   const want = String(steamId);
-  const already = await listReservedSlots(server).catch(() => []);
+  const already = await listReservedSlots(server);
   if (already.includes(want)) {
-    if (minSlots > 0) await writeReservedViaConfig(server, already, { minSlots });
+    console.log(`reserve skip ${server.name} ${want} (уже есть, чужих не трогаем)`);
     return { already: true };
   }
-  const next = [...already, want];
-  await writeReservedViaConfig(server, next, { minSlots });
-  const after = await listReservedSlots(server).catch(() => []);
+  await writeReservedExact(server, already, [...already, want], want, "add");
+  const after = await listReservedSlots(server);
   if (!after.includes(want)) throw new Error(`слот не записался на ${server.name}`);
+  const lost = already.filter((id) => !after.includes(id));
+  if (lost.length) {
+    throw new Error(`после add потеряны чужие ID на ${server.name}: ${lost.join(",")}`);
+  }
   console.log(`reserve ok ${server.name} ${want} (+${already.length} already)`);
   return { already: false };
 }
 
-/** Снимает только этот SteamID, остальных VIP/царя не трогает. */
+/** Снимает только этот SteamID из базы VIP. Остальных из панели не трогает. */
 export async function dropReservedSlot(server, steamId) {
   const want = String(steamId);
-  const ids = await listReservedSlots(server).catch(() => []);
+  const ids = await listReservedSlots(server);
   if (!ids.includes(want)) return { missing: true };
-  await writeReservedViaConfig(server, ids.filter((id) => id !== want));
+
+  const next = ids.filter((id) => id !== want);
+  await writeReservedExact(server, ids, next, want, "drop");
+
+  const after = await listReservedSlots(server);
+  if (after.includes(want)) throw new Error(`слот не снялся на ${server.name}`);
+  const lost = next.filter((id) => !after.includes(id));
+  if (lost.length) {
+    throw new Error(`после drop потеряны чужие ID на ${server.name}: ${lost.join(",")}`);
+  }
+  console.log(`reserve drop ${server.name} ${want} (осталось ${after.length})`);
   return { missing: false };
 }
 
