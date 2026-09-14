@@ -529,7 +529,7 @@ async function handleButton(interaction) {
       await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
       return;
     }
-    const rows = listActiveVips(50);
+    const rows = listActiveVips(80);
     const lines = rows.length
       ? rows.map(
           (v, i) =>
