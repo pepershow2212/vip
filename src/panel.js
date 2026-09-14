@@ -13,7 +13,6 @@ import {
 } from "discord.js";
 import { PACKAGES, config } from "./config.js";
 import { closeTicket, createTicket, getTicket } from "./db.js";
-import { isVipAdmin } from "./permissions.js";
 
 export const CUSTOM = {
   buySelect: "vip:buy_select",
@@ -232,7 +231,7 @@ export async function openPaymentTicket(interaction, days) {
     price: pkg.price,
   });
 
-  const mention = interaction.user.toString();
+  const mention = `${interaction.user}${config.adminRoleIds.map((id) => ` <@&${id}>`).join("")}`;
   await channel.send(paymentPayload(pkg, { mention }));
 
   await interaction.editReply({ content: `Тикет создан: ${channel}` });
@@ -263,8 +262,15 @@ export async function handleShowPay(interaction) {
 export async function handleCloseTicket(interaction) {
   const ticket = getTicket(interaction.channelId);
   const isOwner = ticket && ticket.discord_id === interaction.user.id;
+  const isAdmin =
+    config.adminUserIds.includes(interaction.user.id) ||
+    interaction.member?.roles?.cache?.some((r) => config.adminRoleIds.includes(r.id));
 
-  if (!isOwner && !isVipAdmin(interaction.member, interaction.user.id)) {
+  if (
+    !isOwner &&
+    !isAdmin &&
+    !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
+  ) {
     await interaction.reply({
       content: "Закрыть тикет может только автор или админ.",
       ephemeral: true,
