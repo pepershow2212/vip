@@ -8,6 +8,7 @@ import { config, vipServers } from "./config.js";
 import {
   getActiveVipByDiscord,
   getActiveVipBySteam,
+  getActiveVipById,
   getTicket,
   countActiveVips,
   listActiveVips,
@@ -16,10 +17,13 @@ import {
 import { isVipAdmin } from "./permissions.js";
 import {
   CUSTOM,
+  grantRevokeComponents,
   handleCloseTicket,
   handleShowPay,
+  logsAdminPanelPayload,
   openPaymentTicket,
   panelPayload,
+  revokeSelectPayload,
   scheduleTicketClose,
 } from "./panel.js";
 import {
@@ -81,6 +85,11 @@ export const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("vip-logs-panel")
+    .setDescription("Админ-панель в канале логов VIP (забрать / база)")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+  new SlashCommandBuilder()
     .setName("vip-status")
     .setDescription("Проверить свой VIP или статус игрока")
     .addUserOption((o) => o.setName("user").setDescription("Чей статус смотреть").setRequired(false)),
@@ -107,6 +116,7 @@ async function sendGrantLog(guild, { result, targetId, actorId, ticketChannelId 
         guildId: guild.id,
       }),
     ],
+    components: grantRevokeComponents(result.vipId),
   });
 }
 
@@ -155,6 +165,27 @@ async function handleCommand(interaction) {
     await channel.send(panelPayload());
     await interaction.reply({
       content: `Панель в ${channel}. RCON: **${servers.length}** · VIP слотов: **${countActiveVips()}/${config.vipMaxSlots}**`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  if (name === "vip-logs-panel") {
+    if (!isVipAdmin(interaction.member, interaction.user.id)) {
+      await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const channel = await interaction.guild.channels.fetch(config.logChannelId).catch(() => null);
+    if (!channel?.isTextBased()) {
+      await interaction.reply({
+        content: `Канал логов не найден: \`${config.logChannelId}\``,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    await channel.send(logsAdminPanelPayload());
+    await interaction.reply({
+      content: `Админ-панель VIP в ${channel}`,
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -404,10 +435,50 @@ async function handleCommand(interaction) {
   }
 }
 
+async function executeRevoke(interaction, vip) {
+  await revokeVip({
+    guild: interaction.guild,
+    vipRow: vip,
+    actorId: interaction.user.id,
+    reason: "manual",
+  });
+  await sendRevokeLog(
+    interaction.guild,
+    revokeLogEmbed({ vip, actorId: interaction.user.id, reason: "manual" }),
+    `VIP снят · <@${vip.discord_id}>`,
+  );
+}
+
 async function handleSelect(interaction) {
-  if (interaction.customId !== CUSTOM.buySelect) return;
-  const days = Number(interaction.values[0]);
-  await openPaymentTicket(interaction, days);
+  if (interaction.customId === CUSTOM.buySelect) {
+    const days = Number(interaction.values[0]);
+    await openPaymentTicket(interaction, days);
+    return;
+  }
+
+  if (interaction.customId === CUSTOM.revokeSelect) {
+    if (!isVipAdmin(interaction.member, interaction.user.id)) {
+      await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const vipId = Number(interaction.values[0]);
+    const vip = getActiveVipById(vipId);
+    if (!vip) {
+      await interaction.reply({ content: "Этот VIP уже не активен.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      await executeRevoke(interaction, vip);
+      await interaction.editReply({
+        content: `VIP снят у <@${vip.discord_id}> (\`${vip.steam_id}\`).`,
+      });
+    } catch (error) {
+      await interaction.editReply({
+        content: `Ошибка: ${error instanceof Error ? error.message : error}`,
+      });
+    }
+  }
 }
 
 async function handleButton(interaction) {
@@ -426,5 +497,67 @@ async function handleButton(interaction) {
 
   if (id === CUSTOM.closeTicket) {
     await handleCloseTicket(interaction);
+    return;
+  }
+
+  if (id === CUSTOM.revokeMenu) {
+    if (!isVipAdmin(interaction.member, interaction.user.id)) {
+      await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.reply(revokeSelectPayload(listActiveVips(25)));
+    return;
+  }
+
+  if (id === CUSTOM.dbRefresh) {
+    if (!isVipAdmin(interaction.member, interaction.user.id)) {
+      await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const rows = listActiveVips(50);
+    const lines = rows.length
+      ? rows.map(
+          (v, i) =>
+            `${i + 1}. <@${v.discord_id}> · \`${v.steam_id}\` · ${v.days}д · до ${formatExpires(v.expires_at)}`,
+        )
+      : ["Активных VIP нет."];
+    let body = lines.join("\n");
+    if (body.length > 3900) body = `${body.slice(0, 3900)}\n…`;
+    const embed = new EmbedBuilder()
+      .setColor(0xc4a574)
+      .setTitle(`VIP база · ${countActiveVips()}/${config.vipMaxSlots}`)
+      .setDescription(body)
+      .setTimestamp();
+    await interaction.reply({
+      content: `Проверка БД · <@${interaction.user.id}>`,
+      embeds: [embed],
+    });
+    return;
+  }
+
+  if (id.startsWith("vip:revoke:")) {
+    if (!isVipAdmin(interaction.member, interaction.user.id)) {
+      await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const vipId = Number(id.split(":")[2]);
+    const vip = getActiveVipById(vipId);
+    if (!vip) {
+      await interaction.reply({ content: "Этот VIP уже не активен.", flags: MessageFlags.Ephemeral });
+      await interaction.message.edit({ components: [] }).catch(() => {});
+      return;
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      await executeRevoke(interaction, vip);
+      await interaction.message.edit({ components: [] }).catch(() => {});
+      await interaction.editReply({
+        content: `VIP снят у <@${vip.discord_id}> (\`${vip.steam_id}\`).`,
+      });
+    } catch (error) {
+      await interaction.editReply({
+        content: `Ошибка: ${error instanceof Error ? error.message : error}`,
+      });
+    }
   }
 }

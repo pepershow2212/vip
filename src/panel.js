@@ -21,6 +21,10 @@ export const CUSTOM = {
   status: "vip:status",
   closeTicket: "vip:close",
   showPay: "vip:show_pay",
+  revokeMenu: "vip:revoke_menu",
+  revokeSelect: "vip:revoke_select",
+  revokeId: (vipId) => `vip:revoke:${vipId}`,
+  dbRefresh: "vip:db_refresh",
 };
 
 const ACCENT = 0xc4a574;
@@ -100,6 +104,77 @@ export function panelPayload() {
   return {
     components: [container],
     flags: MessageFlags.IsComponentsV2,
+  };
+}
+
+/** Панель админа в канале логов VIP — забрать / проверить БД */
+export function logsAdminPanelPayload() {
+  const container = new ContainerBuilder()
+    .setAccentColor(0xa85c3c)
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        [
+          "# VIP · Админ",
+          "Канал логов выдачи и снятия VIP.",
+          "",
+          "• **Забрать VIP** — выбрать активного игрока из базы",
+          "• **База VIP** — список активных в этот канал (`/vip-db`)",
+          "• На каждом логе выдачи тоже есть кнопка **Забрать VIP**",
+        ].join("\n"),
+      ),
+    )
+    .addActionRowComponents(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(CUSTOM.revokeMenu)
+          .setLabel("Забрать VIP")
+          .setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+          .setCustomId(CUSTOM.dbRefresh)
+          .setLabel("База VIP")
+          .setStyle(ButtonStyle.Secondary),
+      ),
+    );
+
+  return {
+    components: [container],
+    flags: MessageFlags.IsComponentsV2,
+  };
+}
+
+export function grantRevokeComponents(vipId) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(CUSTOM.revokeId(vipId))
+        .setLabel("Забрать VIP")
+        .setStyle(ButtonStyle.Danger),
+    ),
+  ];
+}
+
+export function revokeSelectPayload(rows) {
+  if (!rows.length) {
+    return {
+      content: "Активных VIP в базе нет.",
+      ephemeral: true,
+    };
+  }
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(CUSTOM.revokeSelect)
+    .setPlaceholder("Кого забрать VIP")
+    .addOptions(
+      rows.slice(0, 25).map((v) => ({
+        label: `${v.steam_id}`.slice(0, 100),
+        description: `до ${String(v.expires_at).slice(0, 16)} · id ${v.id}`.slice(0, 100),
+        value: String(v.id),
+      })),
+    );
+
+  return {
+    content: "Выбери VIP для снятия:",
+    components: [new ActionRowBuilder().addComponents(menu)],
+    ephemeral: true,
   };
 }
 

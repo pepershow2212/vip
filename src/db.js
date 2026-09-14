@@ -93,15 +93,18 @@ export function closeTicket(channelId, status = "closed") {
     .run(status, channelId);
 }
 
-export function getActiveVipByDiscord(discordId) {
+export function getVipById(id) {
+  return getDb().prepare(`SELECT * FROM vips WHERE id = ?`).get(Number(id)) || null;
+}
+
+export function getActiveVipById(id) {
   return (
     getDb()
       .prepare(
         `SELECT * FROM vips
-         WHERE discord_id = ? AND active = 1 AND datetime(expires_at) > datetime('now')
-         ORDER BY datetime(expires_at) DESC LIMIT 1`,
+         WHERE id = ? AND active = 1 AND datetime(expires_at) > datetime('now')`,
       )
-      .get(String(discordId)) || null
+      .get(Number(id)) || null
   );
 }
 
