@@ -1,6 +1,6 @@
 import { listExpiredActive, listExpiringSoon, markReminderSent, logVipAction } from "./db.js";
 import { config } from "./config.js";
-import { formatExpires, revokeLogEmbed, revokeVip } from "./vip.js";
+import { formatExpires, isPermanentVip, revokeLogEmbed, revokeVip } from "./vip.js";
 
 const TICK_MS = 60_000;
 
@@ -20,6 +20,10 @@ export function startVipScheduler(client) {
 async function processReminders(client) {
   const rows = listExpiringSoon(72);
   for (const vip of rows) {
+    if (isPermanentVip(vip)) {
+      markReminderSent(vip.id);
+      continue;
+    }
     try {
       const user = await client.users.fetch(vip.discord_id).catch(() => null);
       if (user) {

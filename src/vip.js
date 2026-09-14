@@ -1,5 +1,5 @@
 import { EmbedBuilder } from "discord.js";
-import { PACKAGES, config, vipServers } from "./config.js";
+import { PACKAGES, PERMANENT_EXPIRES, config, vipServers } from "./config.js";
 import {
   deactivateVip,
   getActiveVipByDiscord,
@@ -17,7 +17,17 @@ export function isSteamId64(value) {
 }
 
 export function packageOf(days) {
+  if (days == null || days === "") return null;
   return PACKAGES[String(days)] || null;
+}
+
+export function isPermanentVip(vipOrDays) {
+  if (vipOrDays && typeof vipOrDays === "object") {
+    if (Number(vipOrDays.days) < 0) return true;
+    if (String(vipOrDays.expires_at || "").startsWith("2099")) return true;
+    return false;
+  }
+  return Number(vipOrDays) < 0;
 }
 
 function isoFromDate(date) {
@@ -36,7 +46,13 @@ function formatMoscow(iso) {
 }
 
 export function formatExpires(iso) {
+  if (!iso || String(iso).startsWith("2099")) return "навсегда";
   return `${formatMoscow(iso)} МСК`;
+}
+
+export function formatVipTerm(vip) {
+  if (isPermanentVip(vip)) return "навсегда";
+  return `${vip.days} дн.`;
 }
 
 function resultsSummary(results) {
@@ -78,7 +94,10 @@ export async function grantVip({
   const steam = String(steamId || "").trim();
   if (!isSteamId64(steam)) throw new Error("Некорректный SteamID64");
   const dayCount = Number(days);
-  if (!Number.isFinite(dayCount) || dayCount < 1) throw new Error("Некорректный срок VIP");
+  const permanent = dayCount < 0 || packageOf(dayCount)?.permanent;
+  if (!Number.isFinite(dayCount) || (dayCount < 1 && !permanent)) {
+    throw new Error("Некорректный срок VIP");
+  }
 
   const servers = vipServers();
   if (!servers.length) throw new Error("Нет настроенных SERVER_*_RCON_* — VIP некуда писать");
@@ -89,7 +108,7 @@ export async function grantVip({
     throw new Error(`Этот SteamID уже привязан к VIP <@${existingSteam.discord_id}>`);
   }
 
-  // Продление существующего VIP не занимает новый слот
+  // Продление / ADMIN навсегда не занимает новый слот, если VIP уже есть
   if (!existingDiscord) {
     const active = countActiveVips();
     if (active >= config.vipMaxSlots) {
@@ -99,11 +118,12 @@ export async function grantVip({
 
   const now = new Date();
   let startsAt = now;
-  if (existingDiscord) {
+  if (existingDiscord && !permanent) {
     const prevEnd = new Date(existingDiscord.expires_at);
-    if (prevEnd > startsAt) startsAt = prevEnd;
-    // старую запись закрываем — новая станет актуальной
-    deactivateVip(existingDiscord.id, "extended");
+    if (prevEnd > startsAt && !isPermanentVip(existingDiscord)) startsAt = prevEnd;
+  }
+  if (existingDiscord) {
+    deactivateVip(existingDiscord.id, permanent ? "admin_permanent" : "extended");
     logVipAction({
       action: "extend_close_old",
       vipId: existingDiscord.id,
@@ -112,17 +132,18 @@ export async function grantVip({
       days: existingDiscord.days,
       expiresAt: existingDiscord.expires_at,
       actorId,
-      details: { reason: "extended" },
+      details: { reason: permanent ? "admin_permanent" : "extended" },
     });
-    // если steam сменился — снимем старый слот
     if (String(existingDiscord.steam_id) !== steam) {
       await reserveOnEach(servers, existingDiscord.steam_id, false);
     }
   }
 
-  const expires = new Date(startsAt.getTime() + dayCount * 86400000);
-  const startsIso = isoFromDate(existingDiscord ? now : startsAt);
-  const expiresIso = isoFromDate(expires);
+  const expiresIso = permanent
+    ? PERMANENT_EXPIRES
+    : isoFromDate(new Date(startsAt.getTime() + dayCount * 86400000));
+  const startsIso = isoFromDate(now);
+  const storeDays = permanent ? -1 : dayCount;
 
   const rconResults = await reserveOnEach(servers, steam, true);
   const rconOk = rconResults.every((r) => r.ok);
@@ -138,8 +159,8 @@ export async function grantVip({
   const vipId = insertVip({
     discordId,
     steamId: steam,
-    days: dayCount,
-    price,
+    days: storeDays,
+    price: permanent ? 0 : price,
     startsAt: startsIso,
     expiresAt: expiresIso,
     grantedBy: actorId,
@@ -147,27 +168,30 @@ export async function grantVip({
   });
 
   logVipAction({
-    action: "grant",
+    action: permanent ? "grant_permanent" : "grant",
     vipId,
     discordId,
     steamId: steam,
-    days: dayCount,
+    days: storeDays,
     expiresAt: expiresIso,
     actorId,
     details: {
-      price,
+      price: permanent ? 0 : price,
       servers: rconResults,
       roleOk: role.ok,
       extended: Boolean(existingDiscord),
+      permanent,
     },
   });
 
   return {
     vipId,
     steamId: steam,
-    days: dayCount,
+    days: storeDays,
+    permanent,
     expiresAt: expiresIso,
     expiresLabel: formatExpires(expiresIso),
+    termLabel: permanent ? "навсегда" : `${dayCount} дн.`,
     rconResults,
     roleOk: role.ok,
     extended: Boolean(existingDiscord),
@@ -206,19 +230,19 @@ export function statusEmbed(vip) {
     .setTitle("Статус VIP")
     .addFields(
       { name: "SteamID64", value: `\`${vip.steam_id}\``, inline: true },
-      { name: "Срок", value: `${vip.days} дн.`, inline: true },
+      { name: "Срок", value: formatVipTerm(vip), inline: true },
       { name: "Действует до", value: formatExpires(vip.expires_at), inline: false },
     );
 }
 
 export function grantLogEmbed({ result, targetId, actorId, ticketChannelId, guildId }) {
   const embed = new EmbedBuilder()
-    .setColor(0x3d8b5f)
-    .setTitle("VIP выдан")
+    .setColor(result.permanent ? 0xc4a574 : 0x3d8b5f)
+    .setTitle(result.permanent ? "VIP выдан · ADMIN навсегда" : "VIP выдан")
     .addFields(
       { name: "Игрок", value: `<@${targetId}>`, inline: true },
       { name: "SteamID64", value: `\`${result.steamId}\``, inline: true },
-      { name: "Срок", value: `${result.days} дн.`, inline: true },
+      { name: "Срок", value: result.termLabel || formatExpires(result.expiresAt), inline: true },
       { name: "До", value: result.expiresLabel, inline: false },
       { name: "Серверы", value: resultsSummary(result.rconResults), inline: false },
       { name: "Админ", value: actorId ? `<@${actorId}>` : "—", inline: true },

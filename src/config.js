@@ -41,7 +41,10 @@ export const PACKAGES = {
   7: { days: 7, price: 200, label: "7 дней" },
   30: { days: 30, price: 600, label: "30 дней" },
   90: { days: 90, price: 1600, label: "90 дней" },
+  "-1": { days: -1, price: 0, label: "ADMIN · навсегда", permanent: true },
 };
+
+export const PERMANENT_EXPIRES = "2099-12-31T23:59:59.000Z";
 
 export const config = {
   root,

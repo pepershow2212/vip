@@ -44,6 +44,8 @@ export function panelPayload() {
         [
           "# WARDOGS VIP",
           "Поддержи сервера — получи приоритет в очереди на **WARDOGS RUSSIA**.",
+          "",
+          "Выбери тариф ниже → тикет → перевод → чек.",
         ].join("\n"),
       ),
     )
@@ -62,8 +64,6 @@ export function panelPayload() {
           "• **200 ₽** — 7 дней",
           "• **600 ₽** — 30 дней",
           "• **1600 ₽** — 90 дней",
-          "",
-          "Выбери тариф → тикет → перевод → **чек**. Админ выдаст VIP вручную.",
         ].join("\n"),
       ),
     )
@@ -225,32 +225,54 @@ export function paymentDetailsText(pkg) {
 export function paymentPayload(pkg, { mention = "" } = {}) {
   const container = new ContainerBuilder()
     .setAccentColor(ACCENT)
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(BANNER_URL),
+      ),
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        [mention || null, `# Оплата VIP · ${pkg.label}`].filter(Boolean).join("\n"),
+      ),
+    )
+    .addSeparatorComponents(
+      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+    )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
         [
-          mention || null,
-          `# Оплата VIP — ${pkg.label}`,
-          `Переведи **${pkg.price} ₽** на ЮMoney:`,
-          `\`${config.yoomoneyWallet}\``,
+          "## 1. Перевод",
+          `Сумма: **${pkg.price} ₽**`,
+          `ЮMoney: \`${config.yoomoneyWallet}\``,
           "",
           "```",
           paymentDetailsText(pkg),
           "```",
+        ].join("\n"),
+      ),
+    )
+    .addSeparatorComponents(
+      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        [
+          "## 2. Чек",
+          "Прикрепи **скрин перевода** в этот канал.",
+          "Должны быть видны **сумма** и **кошелёк**.",
           "",
-          "**Прикрепи чек** (скрин перевода) — администратор выдаст VIP.",
-          "В чеке должны быть видны сумма и кошелёк.",
+          "## 3. Выдача",
+          "Админ проверит чек и выдаст VIP на **WARDOGS RUSSIA**.",
           "",
-          "_Админ:_ `/vip-grant steam_id:...` — игрок и срок подставятся из тикета.",
-        ]
-          .filter((line) => line != null)
-          .join("\n"),
+          "_Админ:_ `/vip-grant steam_id:...` — игрок и срок из тикета.",
+        ].join("\n"),
       ),
     )
     .addActionRowComponents(
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(CUSTOM.showPay)
-          .setLabel("Реквизиты")
+          .setLabel("Скопировать реквизиты")
           .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
           .setCustomId(CUSTOM.closeTicket)

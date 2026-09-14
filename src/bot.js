@@ -28,6 +28,7 @@ import {
 } from "./panel.js";
 import {
   formatExpires,
+  formatVipTerm,
   grantLogEmbed,
   grantVip,
   isSteamId64,
@@ -60,6 +61,7 @@ export const commands = [
           { name: "7 дней (200 ₽)", value: 7 },
           { name: "30 дней (600 ₽)", value: 30 },
           { name: "90 дней (1600 ₽)", value: 90 },
+          { name: "ADMIN · навсегда", value: -1 },
         ),
     ),
 
@@ -242,7 +244,7 @@ async function handleCommand(interaction) {
           .addFields(
             { name: "Discord", value: `<@${vip.discord_id}>`, inline: true },
             { name: "SteamID64", value: `\`${vip.steam_id}\``, inline: true },
-            { name: "Срок", value: `${vip.days} дн.`, inline: true },
+            { name: "Срок", value: formatVipTerm(vip), inline: true },
             { name: "До", value: formatExpires(vip.expires_at), inline: false },
             { name: "Цена", value: `${vip.price || 0} ₽`, inline: true },
             {
@@ -265,7 +267,7 @@ async function handleCommand(interaction) {
       const lines = rows.length
         ? rows.map(
             (v, i) =>
-              `${i + 1}. <@${v.discord_id}> · \`${v.steam_id}\` · ${v.days}д · до ${formatExpires(v.expires_at)}`,
+              `${i + 1}. <@${v.discord_id}> · \`${v.steam_id}\` · ${formatVipTerm(v)} · до ${formatExpires(v.expires_at)}`,
           )
         : ["Активных VIP нет."];
 
@@ -315,9 +317,9 @@ async function handleCommand(interaction) {
     const steamId = interaction.options.getString("steam_id", true).trim();
     const userOpt = interaction.options.getUser("user");
     const daysOpt = interaction.options.getInteger("days");
-
     const discordId = userOpt?.id || ticket?.discord_id || fromTopic?.discordId;
-    const days = daysOpt || ticket?.package_days || fromTopic?.days;
+    const days =
+      daysOpt != null ? daysOpt : ticket?.package_days ?? fromTopic?.days ?? null;
     const pkg = packageOf(days);
 
     if (!discordId) {
@@ -327,9 +329,9 @@ async function handleCommand(interaction) {
       });
       return;
     }
-    if (!days || !pkg) {
+    if (days == null || !pkg) {
       await interaction.reply({
-        content: "Укажи `days` или выполни команду внутри тикета оплаты.",
+        content: "Укажи `days` (7 / 30 / 90 / ADMIN навсегда) или выполни команду в тикете.",
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -364,10 +366,11 @@ async function handleCommand(interaction) {
       });
 
       const publicMsg = [
-        `<@${discordId}>, тебе выдан **VIP** на **${result.days} дн.**`,
+        `<@${discordId}>, тебе выдан **VIP** — **${result.termLabel}**.`,
         `SteamID: \`${result.steamId}\``,
         `Действует до: **${result.expiresLabel}**`,
-        result.extended ? "_Срок продлён от текущей даты окончания._" : "",
+        result.extended ? "_Предыдущий VIP заменён/продлён._" : "",
+        result.permanent ? "_ADMIN · бессрочный приоритет._" : "",
         "",
         "Приоритет в очереди записан на серверах:",
         ...result.rconResults.map((r) => `${r.ok ? "✅" : "❌"} ${r.name}`),
@@ -518,7 +521,7 @@ async function handleButton(interaction) {
     const lines = rows.length
       ? rows.map(
           (v, i) =>
-            `${i + 1}. <@${v.discord_id}> · \`${v.steam_id}\` · ${v.days}д · до ${formatExpires(v.expires_at)}`,
+            `${i + 1}. <@${v.discord_id}> · \`${v.steam_id}\` · ${formatVipTerm(v)} · до ${formatExpires(v.expires_at)}`,
         )
       : ["Активных VIP нет."];
     let body = lines.join("\n");
