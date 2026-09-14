@@ -4,6 +4,8 @@ import {
   ButtonStyle,
   ChannelType,
   ContainerBuilder,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   MessageFlags,
   PermissionFlagsBits,
   SeparatorBuilder,
@@ -22,15 +24,22 @@ export const CUSTOM = {
 };
 
 const ACCENT = 0xc4a574;
+const BANNER_URL = "https://i.ibb.co/sdVC2fSz/sss2s123.png";
+const TICKET_EMOJI = "💎";
 
 export function panelPayload() {
   const container = new ContainerBuilder()
     .setAccentColor(ACCENT)
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(BANNER_URL),
+      ),
+    )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
         [
           "# WARDOGS VIP",
-          "Поддержи сервера — получи приоритет в очереди на **всех** WARDOGS.",
+          "Поддержи сервера — получи приоритет в очереди на **WARDOGS RUSSIA**.",
         ].join("\n"),
       ),
     )
@@ -213,10 +222,10 @@ export async function openPaymentTicket(interaction, days) {
   await interaction.deferReply({ ephemeral: true });
 
   const channel = await interaction.guild.channels.create({
-    name: `vip-${interaction.user.username}`
-      .slice(0, 90)
+    name: `${TICKET_EMOJI}｜vip-${interaction.user.username}`
+      .slice(0, 100)
       .toLowerCase()
-      .replace(/[^a-z0-9\-а-яё]/gi, "-"),
+      .replace(/[^a-z0-9\-а-яё💎｜]/gi, "-"),
     type: ChannelType.GuildText,
     parent: config.ticketCategoryId,
     topic: `vip:${interaction.user.id}:${pkg.days}`,
@@ -327,9 +336,11 @@ export async function archiveTicketChannel(channel, { status = "granted", reason
   }
 
   const baseName = String(channel.name || "vip")
+    .replace(/^💎｜?/, "")
     .replace(/^архив-/, "")
+    .replace(/^💎｜?архив-/, "")
     .slice(0, 90);
-  const archivedName = `архив-${baseName}`.slice(0, 100);
+  const archivedName = `${TICKET_EMOJI}｜архив-${baseName}`.slice(0, 100);
 
   const edit = {
     name: archivedName,
