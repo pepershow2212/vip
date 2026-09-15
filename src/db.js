@@ -257,6 +257,18 @@ export function listActiveVips(limit = 80) {
     .all(Math.max(1, Math.min(Number(limit) || 80, 100)));
 }
 
+/** Все активные SteamID из БД VIP (для sync на серверы). */
+export function listActiveVipSteamIds() {
+  return getDb()
+    .prepare(
+      `SELECT DISTINCT steam_id AS steam_id FROM vips
+       WHERE active = 1 AND datetime(expires_at) > datetime('now')
+       ORDER BY steam_id ASC`,
+    )
+    .all()
+    .map((row) => String(row.steam_id));
+}
+
 export function listVipHistory(limit = 20) {
   return getDb()
     .prepare(

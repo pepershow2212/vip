@@ -274,3 +274,92 @@ export async function rollbackAddedSlots(servers, steamId, addResults) {
     }
   }
 }
+
+/**
+ * Дописывает все VIP SteamID на один сервер одним PUT.
+ * Чужие reserved (панель / царь) не трогает — только merge.
+ */
+export async function mergeVipIdsOnServer(server, steamIds) {
+  const want = uniqIds(steamIds);
+  const before = await listReservedSlots(server);
+  const missing = want.filter((id) => !before.includes(id));
+  if (!missing.length) {
+    console.log(`sync skip ${server.name}: все ${want.length} VIP уже в reserved`);
+    return {
+      already: true,
+      added: 0,
+      missing: 0,
+      reservedBefore: before.length,
+      reservedAfter: before.length,
+    };
+  }
+
+  const doc = await rconGet(server, "/v1/config", 8000);
+  const configText = doc?.text || "";
+  const configIds = reservedIdsFromConfig(configText);
+  const live = uniqIds([...configIds, ...before]);
+  const finalIds = uniqIds([...live, ...want]);
+
+  const lost = live.filter((id) => !finalIds.includes(id));
+  if (lost.length) {
+    throw new Error(`abort sync ${server.name}: потеряли чужие ID ${lost.join(",")}`);
+  }
+
+  const payload = applyReservedIds(configText, finalIds);
+  await rconCall(server, "/v1/config?force=true", {
+    method: "PUT",
+    raw: payload,
+    timeoutMs: 20000,
+    headers: { "content-type": "text/plain" },
+  });
+
+  const after = await listReservedSlots(server);
+  const stillMissing = want.filter((id) => !after.includes(id));
+  if (stillMissing.length) {
+    throw new Error(
+      `sync ${server.name}: не записались ${stillMissing.slice(0, 5).join(",")}${stillMissing.length > 5 ? "…" : ""}`,
+    );
+  }
+  const lostAfter = live.filter((id) => !after.includes(id));
+  if (lostAfter.length) {
+    throw new Error(`после sync потеряны ID на ${server.name}: ${lostAfter.join(",")}`);
+  }
+
+  const added = after.length - before.length;
+  console.log(
+    `sync ok ${server.name}: +${missing.length} VIP (reserved ${before.length} → ${after.length})`,
+  );
+  return {
+    already: false,
+    added: missing.length,
+    missing: missing.length,
+    reservedBefore: before.length,
+    reservedAfter: after.length,
+    delta: added,
+  };
+}
+
+/** Прогоняет VIP-базу на все переданные серверы. */
+export async function syncVipIdsToServers(servers, steamIds) {
+  const results = [];
+  for (const server of servers || []) {
+    try {
+      const detail = await mergeVipIdsOnServer(server, steamIds);
+      results.push({
+        id: server.id,
+        name: server.name,
+        ok: true,
+        ...detail,
+      });
+    } catch (error) {
+      console.warn("sync", server.name, error instanceof Error ? error.message : error);
+      results.push({
+        id: server.id,
+        name: server.name,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return results;
+}

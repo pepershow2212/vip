@@ -1,5 +1,5 @@
 import { EmbedBuilder } from "discord.js";
-import { PACKAGES, PERMANENT_EXPIRES, config, vipServers } from "./config.js";
+import { PACKAGES, PERMANENT_EXPIRES, config, refreshVipServers, vipServers } from "./config.js";
 import {
   deactivateVip,
   getActiveVipByDiscord,
@@ -7,8 +7,9 @@ import {
   insertVip,
   logVipAction,
   countActiveVips,
+  listActiveVipSteamIds,
 } from "./db.js";
-import { reserveOnEach, rollbackAddedSlots } from "./rcon.js";
+import { reserveOnEach, rollbackAddedSlots, syncVipIdsToServers } from "./rcon.js";
 
 const STEAM_RE = /^7656119\d{10}$/;
 
@@ -241,6 +242,42 @@ export async function revokeVip({ guild, vipRow, actorId, reason = "manual" }) {
     details: { reason, servers: rconResults },
   });
   return { rconResults };
+}
+
+/**
+ * Прогоняет все активные SteamID из SQLite на все включённые SERVER_*.
+ * Нужно после добавления 3-го / 4-го сервера: env → рестарт бота → /vip-sync.
+ */
+export async function syncVipDatabaseToServers({ actorId } = {}) {
+  const servers = refreshVipServers();
+  if (!servers.length) {
+    throw new Error("Нет настроенных SERVER_*_RCON_HOST/PASSWORD");
+  }
+
+  const steamIds = listActiveVipSteamIds();
+  const results = await syncVipIdsToServers(servers, steamIds);
+
+  logVipAction({
+    action: "sync_servers",
+    actorId: actorId || null,
+    details: {
+      vipCount: steamIds.length,
+      servers: results.map((r) => ({
+        id: r.id,
+        name: r.name,
+        ok: r.ok,
+        added: r.added ?? 0,
+        error: r.error || null,
+      })),
+    },
+  });
+
+  return {
+    steamIds,
+    servers,
+    results,
+    ok: results.every((r) => r.ok),
+  };
 }
 
 export function statusEmbed(vip) {

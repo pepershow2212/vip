@@ -39,6 +39,7 @@ import {
   revokeLogEmbed,
   revokeVip,
   statusEmbed,
+  syncVipDatabaseToServers,
 } from "./vip.js";
 
 export const commands = [
@@ -79,6 +80,14 @@ export const commands = [
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addUserOption((o) => o.setName("user").setDescription("Игрок Discord").setRequired(false))
     .addStringOption((o) => o.setName("steam_id").setDescription("SteamID64").setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName("vip-sync")
+    .setDescription("Админ: прогнать всю VIP-базу в reserved на все SERVER_*")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addBooleanOption((o) =>
+      o.setName("post_log").setDescription("Дублировать отчёт в канал логов (по умолчанию да)").setRequired(false),
+    ),
 
   new SlashCommandBuilder()
     .setName("vip-db")
@@ -216,6 +225,63 @@ async function handleCommand(interaction) {
       console.error("vip-logs-panel send", error);
       await interaction.editReply({
         content: `Не удалось отправить: ${error instanceof Error ? error.message : error}`,
+      });
+    }
+    return;
+  }
+
+  if (name === "vip-sync") {
+    if (!isVipAdmin(interaction.member, interaction.user.id)) {
+      await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const shouldPost = interaction.options.getBoolean("post_log") !== false;
+
+    try {
+      const sync = await syncVipDatabaseToServers({ actorId: interaction.user.id });
+      const lines = sync.results.map((r) => {
+        if (!r.ok) return `❌ **${r.name}** — ${r.error || "ошибка"}`;
+        if (r.already) {
+          return `✅ **${r.name}** — уже актуально (reserved ${r.reservedAfter})`;
+        }
+        return `✅ **${r.name}** — дописано **${r.added}** · reserved ${r.reservedBefore} → ${r.reservedAfter}`;
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(sync.ok ? 0x3d8b5f : 0xa85c3c)
+        .setTitle(sync.ok ? "VIP sync · готово" : "VIP sync · с ошибками")
+        .setDescription(
+          [
+            `Активных VIP в БД: **${sync.steamIds.length}**`,
+            `Серверов RCON: **${sync.servers.length}**`,
+            "",
+            ...lines,
+          ].join("\n"),
+        )
+        .setFooter({ text: `Запросил ${interaction.user.tag}` })
+        .setTimestamp();
+
+      if (shouldPost && config.logChannelId) {
+        const logChannel = await interaction.guild.channels.fetch(config.logChannelId).catch(() => null);
+        if (logChannel?.isTextBased()) {
+          await logChannel.send({
+            content: `Sync VIP-базы · <@${interaction.user.id}>`,
+            embeds: [embed],
+          });
+          await keepLogsAdminPanelBottom(logChannel);
+        }
+      }
+
+      await interaction.editReply({
+        content: sync.ok
+          ? `Готово: **${sync.steamIds.length}** VIP → **${sync.servers.length}** сервер(ов).`
+          : "Синк завершён с ошибками — смотри отчёт.",
+        embeds: [embed],
+      });
+    } catch (error) {
+      await interaction.editReply({
+        content: `Ошибка sync: ${error instanceof Error ? error.message : error}`,
       });
     }
     return;

@@ -71,6 +71,12 @@ export function vipServers() {
   return config.servers.filter((server) => server.enabled);
 }
 
+/** Перечитывает SERVER_* из окружения (после добавления 3/4-го сервера + рестарта env). */
+export function refreshVipServers() {
+  config.servers = [1, 2, 3, 4, 5, 6].map(makeServer);
+  return vipServers();
+}
+
 export function ensureDataDir() {
   mkdirSync(dirname(config.databasePath), { recursive: true });
 }
