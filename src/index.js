@@ -8,6 +8,7 @@ import {
 import { config, envFileExists, vipServers } from "./config.js";
 import { getDb } from "./db.js";
 import { handleInteraction } from "./bot.js";
+import { deploySlashCommands } from "./deploy-commands.js";
 import { startVipScheduler } from "./scheduler.js";
 
 if (!config.discordToken) {
@@ -34,7 +35,7 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-client.once(Events.ClientReady, (c) => {
+client.once(Events.ClientReady, async (c) => {
   const servers = vipServers();
   console.log(`VIP bot online as ${c.user.tag}`);
   console.log(`VIP slots limit: ${config.vipMaxSlots} · DB: ${config.databasePath}`);
@@ -44,6 +45,18 @@ client.once(Events.ClientReady, (c) => {
   if (!servers.length) {
     console.warn("SERVER_*_RCON_HOST/PASSWORD пустые — выдача VIP в reserved slots не сработает");
   }
+
+  try {
+    const deployed = await deploySlashCommands();
+    console.log(
+      deployed.scope === "guild"
+        ? `Slash commands synced to guild ${deployed.id} (${deployed.count})`
+        : `Slash commands synced globally (${deployed.count})`,
+    );
+  } catch (error) {
+    console.error("slash deploy failed", error instanceof Error ? error.message : error);
+  }
+
   startVipScheduler(client);
 });
 
