@@ -13,6 +13,7 @@ import {
   countActiveVips,
   listActiveVips,
   listVipHistory,
+  closeOpenTicketsForDiscord,
 } from "./db.js";
 import { isVipAdmin } from "./permissions.js";
 import {
@@ -487,8 +488,17 @@ async function handleCommand(interaction) {
         await interaction.channel.send(publicMsg);
       }
 
-      if (ticketChannelId && interaction.channelId === ticketChannelId) {
-        scheduleTicketClose(interaction.channel);
+      // Всегда закрываем open-тикеты игрока после выдачи VIP
+      closeOpenTicketsForDiscord(discordId, "granted");
+
+      if (ticketChannelId) {
+        const ticketChannel =
+          interaction.channelId === ticketChannelId
+            ? interaction.channel
+            : await interaction.guild.channels.fetch(ticketChannelId).catch(() => null);
+        if (ticketChannel) {
+          scheduleTicketClose(ticketChannel);
+        }
       }
 
       await interaction.editReply({

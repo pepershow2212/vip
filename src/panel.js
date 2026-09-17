@@ -27,6 +27,7 @@ import {
   deleteMeta,
   getMeta,
   getOpenTicketByDiscord,
+  closeOpenTicketsForDiscord,
   getTicket,
   setMeta,
   setTicketSteamId,
@@ -484,21 +485,32 @@ export async function openPaymentTicket(interaction, days, steamId) {
   const openDb = getOpenTicketByDiscord(interaction.user.id);
   if (openDb) {
     const ch = await interaction.guild.channels.fetch(openDb.channel_id).catch(() => null);
-    if (ch) {
+    const topic = String(ch?.topic || "");
+    const stillOpenChannel =
+      ch &&
+      ch.parentId === config.ticketCategoryId &&
+      topic.startsWith(`vip:${interaction.user.id}:`) &&
+      !topic.startsWith("archived:") &&
+      !/архив/i.test(String(ch.name || ""));
+
+    if (stillOpenChannel) {
       await interaction.reply({
         content: `У тебя уже есть открытый тикет: ${ch}`,
         flags: MessageFlags.Ephemeral,
       });
       return;
     }
-    closeTicket(openDb.channel_id, "closed");
+    // Канал удалён / уже в архиве, а в БД ошибочно open — освобождаем
+    closeOpenTicketsForDiscord(interaction.user.id, "closed");
   }
 
   const existing = interaction.guild.channels.cache.find(
     (ch) =>
       ch.parentId === config.ticketCategoryId &&
       typeof ch.topic === "string" &&
-      ch.topic.startsWith(`vip:${interaction.user.id}:`),
+      ch.topic.startsWith(`vip:${interaction.user.id}:`) &&
+      !ch.topic.startsWith("archived:") &&
+      !/архив/i.test(String(ch.name || "")),
   );
   if (existing) {
     await interaction.reply({
@@ -652,8 +664,10 @@ export async function handleCloseTicket(interaction) {
 export async function archiveTicketChannel(channel, { status = "granted", reason = "archived" } = {}) {
   if (!channel) return;
   closeTicket(channel.id, status);
-
   const ownerId = getTicket(channel.id)?.discord_id;
+  if (ownerId) {
+    closeOpenTicketsForDiscord(ownerId, status);
+  }
   const overwrites = [
     {
       id: channel.guild.id,

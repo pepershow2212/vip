@@ -133,6 +133,16 @@ export function getOpenTicketByDiscord(discordId) {
   );
 }
 
+/** Закрывает все open-тикеты игрока (после выдачи VIP / архива). */
+export function closeOpenTicketsForDiscord(discordId, status = "granted") {
+  getDb()
+    .prepare(
+      `UPDATE tickets SET status = ?, closed_at = datetime('now')
+       WHERE discord_id = ? AND status = 'open'`,
+    )
+    .run(status, String(discordId));
+}
+
 export function setTicketSteamId(channelId, steamId) {
   getDb()
     .prepare(`UPDATE tickets SET steam_id = ? WHERE channel_id = ?`)
