@@ -107,6 +107,10 @@ export function panelPayload() {
             "Не исключает уже играющих и **не** даёт преимуществ внутри матча.",
             "Правила сервера одинаковы для всех.",
             "",
+            "## Оплата",
+            "• **РФ** — ЮMoney",
+            `• **Другие страны** — [Boosty](${config.boostyDonateUrl})`,
+            "",
             "## Тарифы",
             "• **200 ₽** — 7 дней",
             "• **600 ₽** — 30 дней",
@@ -330,9 +334,10 @@ function ticketOverwrites(guild, userId) {
 
 export function paymentDetailsText(pkg) {
   return [
-    `ЮMoney: ${config.yoomoneyWallet}`,
     `Сумма: ${pkg.price} ₽`,
     `Тариф: VIP ${pkg.label}`,
+    `РФ · ЮMoney: ${config.yoomoneyWallet}`,
+    `Другие страны · Boosty: ${config.boostyDonateUrl}`,
   ].join("\n");
 }
 
@@ -394,9 +399,14 @@ export function paymentPayload(pkg, { mention = "", steamId = "" } = {}) {
             "## 1. SteamID",
             steamLine,
             "",
-            "## 2. Перевод",
-            `Сумма: **${pkg.price} ₽**`,
-            `ЮMoney: \`${config.yoomoneyWallet}\``,
+            `## 2. Перевод · **сумма ${pkg.price} ₽**`,
+            "",
+            "**РФ · ЮMoney**",
+            `\`${config.yoomoneyWallet}\``,
+            "",
+            "**Другие страны · Boosty**",
+            config.boostyDonateUrl,
+            "_Карты / зарубежная оплата — укажи в комментарии тариф VIP._",
             "",
             "```",
             paymentDetailsText(pkg),
@@ -411,8 +421,9 @@ export function paymentPayload(pkg, { mention = "", steamId = "" } = {}) {
         new TextDisplayBuilder().setContent(
           [
             "## 3. Чек",
-            "Прикрепи **скрин перевода** в этот канал.",
-            "Должны быть видны **сумма** и **кошелёк**.",
+            "Прикрепи **скрин оплаты** в этот канал.",
+            "ЮMoney: видны **сумма** и **кошелёк**.",
+            "Boosty: видны **сумма** и донат на **wardogsrussia**.",
             "",
             "## 4. Выдача",
             "Админ проверит чек и выдаст VIP на **WARDOGS RUSSIA**.",
@@ -427,6 +438,10 @@ export function paymentPayload(pkg, { mention = "", steamId = "" } = {}) {
             .setCustomId(CUSTOM.showPay)
             .setLabel("Скопировать реквизиты")
             .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setLabel("Оплатить Boosty")
+            .setStyle(ButtonStyle.Link)
+            .setURL(config.boostyDonateUrl),
           new ButtonBuilder()
             .setCustomId(CUSTOM.setSteam)
             .setLabel("Изменить SteamID")
